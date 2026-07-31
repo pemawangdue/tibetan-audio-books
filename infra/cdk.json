@@ -1,0 +1,30 @@
+{
+  "app": "python app.py",
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/core:target-partitions": ["aws", "aws-cn"],
+    "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
+    "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,
+    "stageName": "$default",
+    "monlamSecretName": "dadhep/monlam-api-key",
+    "apiMemoryMb": 1024,
+    "apiTimeoutSeconds": 30,
+    "apiEphemeralStorageMb": 512,
+    "apiReservedConcurrency": 2,
+    "splitMemoryMb": 2048,
+    "splitTimeoutSeconds": 300,
+    "splitEphemeralStorageMb": 2048,
+    "splitReservedConcurrency": 2,
+    "documentBatchSize": 1,
+    "documentMaxConcurrency": 2,
+    "workerMemoryMb": 3008,
+    "workerTimeoutSeconds": 300,
+    "workerEphemeralStorageMb": 4096,
+    "workerReservedConcurrency": 5,
+    "priorityBatchSize": 1,
+    "priorityMaxConcurrency": 2,
+    "standardBatchSize": 1,
+    "standardMaxConcurrency": 2
+  }
+}

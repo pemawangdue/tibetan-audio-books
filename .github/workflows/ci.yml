@@ -1,0 +1,55 @@
+name: CICD
+
+on:
+  pull_request:
+  push:
+    branches: [main, master, bugfix/*, feature/*, hotfix/*]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configure AWS credentials
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install && npm run build
+
+      - name: Install infrastructure dependencies
+        working-directory: infra
+        run: python -m pip install -r requirements.txt
+
+      - name: Deploy CDK stack
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        working-directory: infra
+        run: npx aws-cdk deploy --require-approval never --all

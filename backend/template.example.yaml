@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Example Dadhep MVP backend resources (review before production use)
+
+Parameters:
+  CognitoUserPoolId: { Type: String }
+  CognitoAppClientId: { Type: String }
+  MonlamProvider: { Type: String, Default: mock, AllowedValues: [mock, rest] }
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    CodeUri: .
+    Environment:
+      Variables:
+        ENV: production
+        LOCAL_AUTH_BYPASS: "false"
+        BOOKS_TABLE: !Ref BooksTable
+        PAGES_TABLE: !Ref PagesTable
+        CACHE_TABLE: !Ref CacheTable
+        UPLOAD_BUCKET: !Ref UploadBucket
+        ASSETS_BUCKET: !Ref AssetsBucket
+        SPLIT_QUEUE_URL: !Ref SplitQueue
+        PAGE_QUEUE_URL: !Ref PageQueue
+        PRIORITY_QUEUE_URL: !Ref PriorityQueue
+        COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+        COGNITO_APP_CLIENT_ID: !Ref CognitoAppClientId
+        MONLAM_PROVIDER: !Ref MonlamProvider
+
+Resources:
+  UploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-uploads
+            Status: Enabled
+            ExpirationInDays: 7
+
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  BooksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: book_id, AttributeType: S }]
+      KeySchema: [{ AttributeName: book_id, KeyType: HASH }]
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+
+  PagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: book_id, AttributeType: S }
+        - { AttributeName: page_number, AttributeType: N }
+      KeySchema:
+        - { AttributeName: book_id, KeyType: HASH }
+        - { AttributeName: page_number, KeyType: RANGE }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+
+  CacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: cache_key, AttributeType: S }]
+      KeySchema: [{ AttributeName: cache_key, KeyType: HASH }]
+      TimeToLiveSpecification: { AttributeName: expires_at, Enabled: true }
+
+  WorkerDLQ:
+    Type: AWS::SQS::Queue
+    Properties: { MessageRetentionPeriod: 1209600 }
+  SplitQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 360
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WorkerDLQ.Arn
+        maxReceiveCount: 3
+  PageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 360
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WorkerDLQ.Arn
+        maxReceiveCount: 5
+  PriorityQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 360
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WorkerDLQ.Arn
+        maxReceiveCount: 5
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler.handler
+      Timeout: 30
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref BooksTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref PagesTable }
+        - S3CrudPolicy: { BucketName: !Ref UploadBucket }
+        - S3CrudPolicy: { BucketName: !Ref AssetsBucket }
+        - SQSSendMessagePolicy: { QueueName: !GetAtt SplitQueue.QueueName }
+        - SQSSendMessagePolicy: { QueueName: !GetAtt PriorityQueue.QueueName }
+      Events:
+        Proxy:
+          Type: HttpApi
+          Properties: { Path: /{proxy+}, Method: ANY }
+
+  SplitFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.split_worker.handler
+      Timeout: 300
+      MemorySize: 2048
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref BooksTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref PagesTable }
+        - S3ReadPolicy: { BucketName: !Ref UploadBucket }
+        - S3CrudPolicy: { BucketName: !Ref AssetsBucket }
+        - SQSSendMessagePolicy: { QueueName: !GetAtt PageQueue.QueueName }
+      Events:
+        SplitJobs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt SplitQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes: [ReportBatchItemFailures]
+
+  PageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.page_worker.handler
+      Timeout: 300
+      MemorySize: 1536
+      ReservedConcurrentExecutions: 20
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref BooksTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref PagesTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref CacheTable }
+        - S3CrudPolicy: { BucketName: !Ref AssetsBucket }
+      Events:
+        StandardJobs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt PageQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes: [ReportBatchItemFailures]
+
+  PriorityPageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.page_worker.handler
+      Timeout: 300
+      MemorySize: 1536
+      ReservedConcurrentExecutions: 5
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref BooksTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref PagesTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref CacheTable }
+        - S3CrudPolicy: { BucketName: !Ref AssetsBucket }
+      Events:
+        PriorityJobs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt PriorityQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes: [ReportBatchItemFailures]

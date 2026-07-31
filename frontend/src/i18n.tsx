@@ -1,0 +1,201 @@
+/* oxlint-disable react/only-export-components -- i18n context intentionally colocates its hook and provider */
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+
+export type Language = "en" | "bo";
+const messages = {
+  en: {
+    library: "Library",
+    uploads: "My Uploads",
+    shared: "Shared with me",
+    upload: "Upload a book",
+    emptyTitle: "Your listening library starts here",
+    emptyBody:
+      "Upload a PDF or clear page images. We’ll turn the text into sentence-by-sentence audio.",
+    settings: "Settings",
+    signOut: "Sign out",
+    bookmarks: "Bookmarks",
+    collection: "Your collection",
+    sharedComing: "Shared library coming later",
+    sharedComingBody:
+      "Publishing stays disabled until copyright attestation and moderation are available.",
+    backLibrary: "Back to library",
+    newAudiobook: "New audiobook",
+    uploadTitle: "Upload your book",
+    uploadHelp:
+      "Choose one PDF, a single page image, or several page images in reading order.",
+    bookTitle: "Book title",
+    chooseFiles: "Choose files",
+    uploadAction: "Upload and create audio",
+    uploading: "Uploading…",
+    makingAudiobook: "Making your audiobook",
+    processing: "Reading every page…",
+    processingStopped: "Processing stopped",
+    processingHelp:
+      "Extracting Tibetan text and creating sentence audio. You may leave this page.",
+    returnLibrary: "Return to library",
+    openingBook: "Opening book…",
+    audiobook: "Audiobook",
+    startListening: "Start listening",
+    availablePages: "Available pages",
+    page: "Page",
+    previousPage: "Previous page",
+    nextPage: "Next page",
+    previousSentence: "Previous sentence",
+    nextSentence: "Next sentence",
+    playbackSpeed: "Playback speed",
+    sleepTimer: "Sleep timer",
+    off: "Off",
+    correctSentence: "Correct this sentence",
+    correctionHelp:
+      "Your correction will regenerate this page’s audio while the old audio remains available.",
+    correctedText: "Corrected text",
+    cancel: "Cancel",
+    submitCorrection: "Submit correction",
+    savedPlaces: "Saved places",
+    noBookmarks: "No bookmarks yet",
+    noBookmarksBody:
+      "Save a sentence while listening and it will appear here.",
+    preferences: "Your preferences",
+    account: "Account",
+    language: "Language",
+    languageHelp: "Choose the interface language",
+    ttsVoice: "TTS voice",
+    voiceHelp: "Used when the provider offers multiple voices",
+    defaultTibetan: "Default Tibetan",
+    defaultSpeed: "Default speed",
+    speedHelp: "Playback speed for new sessions",
+    somethingWrong: "Something went wrong",
+    pageNotFound: "Page not found",
+    goLibrary: "Go to library",
+    signIn: "Sign in",
+    createAccount: "Create an account",
+    emailPhone: "Email or phone",
+    password: "Password",
+    verifyAccount: "Verify account",
+    verificationCode: "Verification code",
+    listenTitle: "Listen to Tibetan texts",
+    listenBody: "Turn your books into clear, sentence-by-sentence audio.",
+    back: "Back",
+    play: "Play audio",
+    pause: "Pause audio",
+    addBookmark: "Add bookmark",
+    regenerating: "Regenerating",
+    correctionHint: "Double-click any sentence to suggest a correction.",
+    audioPosition: "Audio position",
+  },
+  bo: {
+    library: "དཔེ་མཛོད།",
+    uploads: "ངའི་ཡིག་ཆ།",
+    shared: "མཉམ་སྤྱོད།",
+    upload: "དཔེ་ཆ་ཡར་འཇུག",
+    emptyTitle: "ཁྱེད་ཀྱི་ཉན་དེབ་དཔེ་མཛོད།",
+    emptyBody:
+      "PDF ཡང་ན་པར་རིས་གསལ་པོ་ཡར་འཇུག་བྱོས། ང་ཚོས་སྒྲ་རུ་སྒྱུར་རོགས་བྱེད།",
+    settings: "སྒྲིག་འགོད།",
+    signOut: "ཕྱིར་ཐོན།",
+    bookmarks: "དེབ་རྟགས།",
+    collection: "ཁྱེད་ཀྱི་དཔེ་མཛོད།",
+    sharedComing: "མཉམ་སྤྱོད་དཔེ་མཛོད་རྗེས་སུ་འབྱུང་།",
+    sharedComingBody:
+      "པར་དབང་ངོས་ལེན་དང་ཞིབ་བཤེར་མ་ཚར་བར་དུ་སྤེལ་བཀྲམ་བྱེད་མི་ཐུབ།",
+    backLibrary: "དཔེ་མཛོད་ལ་ཕྱིར་ལོག",
+    newAudiobook: "ཉན་དེབ་གསར་པ།",
+    uploadTitle: "དཔེ་ཆ་ཡར་འཇུག",
+    uploadHelp: "PDF གཅིག་གམ་པར་རིས་རིམ་པ་བཞིན་འདེམས་རོགས།",
+    bookTitle: "དཔེ་ཆའི་མིང་།",
+    chooseFiles: "ཡིག་ཆ་འདེམས།",
+    uploadAction: "ཡར་འཇུག་དང་སྒྲ་བཟོ།",
+    uploading: "ཡར་འཇུག་བྱེད་བཞིན་པ།",
+    makingAudiobook: "ཉན་དེབ་བཟོ་བཞིན་པ།",
+    processing: "ཤོག་ངོས་རེ་རེ་ཀློག་བཞིན་པ།",
+    processingStopped: "ལས་སྣོན་མཚམས་ཆད།",
+    processingHelp:
+      "བོད་ཡིག་བཏོན་ནས་ཚིག་གྲུབ་རེ་རེའི་སྒྲ་བཟོ་བཞིན་ཡོད།",
+    returnLibrary: "དཔེ་མཛོད་ལ་ལོག",
+    openingBook: "དཔེ་ཆ་ཁ་འབྱེད་བཞིན་པ།",
+    audiobook: "ཉན་དེབ།",
+    startListening: "ཉན་འགོ་ཚུགས།",
+    availablePages: "ཉན་ཐུབ་པའི་ཤོག་ངོས།",
+    page: "ཤོག་ངོས།",
+    previousPage: "ཤོག་ངོས་སྔ་མ།",
+    nextPage: "ཤོག་ངོས་རྗེས་མ།",
+    previousSentence: "ཚིག་གྲུབ་སྔ་མ།",
+    nextSentence: "ཚིག་གྲུབ་རྗེས་མ།",
+    playbackSpeed: "ཉན་ཚད།",
+    sleepTimer: "ཉལ་བའི་དུས་ཚོད།",
+    off: "སྒོ་རྒྱག",
+    correctSentence: "ཚིག་གྲུབ་འདི་བཅོས།",
+    correctionHelp: "ཡི་གེ་བཅོས་རྗེས་ཤོག་ངོས་འདིའི་སྒྲ་བསྐྱར་བཟོ་བྱེད།",
+    correctedText: "བཅོས་པའི་ཡི་གེ",
+    cancel: "ཕྱིར་འཐེན།",
+    submitCorrection: "བཅོས་པ་ཕུལ།",
+    savedPlaces: "ཉར་ཚགས་བྱས་པ།",
+    noBookmarks: "དེབ་རྟགས་མེད།",
+    noBookmarksBody: "ཉན་སྐབས་ཚིག་གྲུབ་ཉར་ན་འདིར་འཆར།",
+    preferences: "ཁྱེད་ཀྱི་འདེམས་སྒྲིག",
+    account: "ཐོ་ཁོངས།",
+    language: "སྐད་ཡིག",
+    languageHelp: "མཐུད་ངོས་ཀྱི་སྐད་ཡིག་འདེམས།",
+    ttsVoice: "སྒྲའི་སྐད།",
+    voiceHelp: "སྒྲ་ཞབས་ཀྱིས་སྐད་སྣ་མང་པོ་འདོན་སྐབས་སྤྱོད།",
+    defaultTibetan: "བོད་སྐད་སྔོན་སྒྲིག",
+    defaultSpeed: "སྔོན་སྒྲིག་ཉན་ཚད།",
+    speedHelp: "ཉན་ཐེངས་གསར་པའི་མྱུར་ཚད།",
+    somethingWrong: "གནད་དོན་ཞིག་བྱུང་།",
+    pageNotFound: "ཤོག་ངོས་རྙེད་མ་སོང་།",
+    goLibrary: "དཔེ་མཛོད་ལ་འགྲོ།",
+    signIn: "ནང་འཛུལ།",
+    createAccount: "ཐོ་ཁོངས་གསར་པ།",
+    emailPhone: "གློག་འཕྲིན་ནམ་ཁ་པར།",
+    password: "གསང་ཨང་།",
+    verifyAccount: "ཐོ་ཁོངས་ངོས་ལེན།",
+    verificationCode: "ངོས་ལེན་ཨང་།",
+    listenTitle: "བོད་ཡིག་གི་དཔེ་ཆ་ཉོན།",
+    listenBody: "དཔེ་ཆ་རྣམས་ཚིག་གྲུབ་རེ་རེའི་སྒྲ་གསལ་པོར་སྒྱུར།",
+    back: "ཕྱིར་ལོག",
+    play: "སྒྲ་གཏོང་།",
+    pause: "སྒྲ་སྐབས་འཇོག",
+    addBookmark: "དེབ་རྟགས་སྣོན།",
+    regenerating: "སྒྲ་བསྐྱར་བཟོ་བཞིན་པ།",
+    correctionHint: "ཚིག་གྲུབ་བཅོས་འདོད་ན་ཐེངས་གཉིས་གནོན།",
+    audioPosition: "སྒྲའི་གནས།",
+  },
+} as const;
+
+type Key = keyof typeof messages.en;
+interface I18nValue {
+  language: Language;
+  setLanguage(value: Language): void;
+  t(key: Key): string;
+}
+const I18nContext = createContext<I18nValue | null>(null);
+
+export function I18nProvider({ children }: { children: ReactNode }) {
+  const [language, setLanguageState] = useState<Language>(
+    () => (localStorage.getItem("dadhep.language") as Language) || "en",
+  );
+  const value = useMemo(
+    () => ({
+      language,
+      setLanguage(next: Language) {
+        localStorage.setItem("dadhep.language", next);
+        setLanguageState(next);
+      },
+      t: (key: Key) => messages[language][key],
+    }),
+    [language],
+  );
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export const useI18n = () => {
+  const value = useContext(I18nContext);
+  if (!value) throw new Error("useI18n must be used inside I18nProvider");
+  return value;
+};

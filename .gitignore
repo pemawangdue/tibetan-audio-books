@@ -1,0 +1,36 @@
+# JavaScript
+node_modules/
+dist/
+.vite/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# AWS CDK
+cdk.out/
+.cdk.staging/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# IDE and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local data and generated artifacts
+.local/
+tmp/
+*.log
+*.zip
