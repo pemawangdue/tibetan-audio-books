@@ -220,6 +220,30 @@ function mapPage(page: ApiPage): BookPage {
   };
 }
 
+async function loadBookPages(
+  id: string,
+  pageNumbers: number[],
+): Promise<BookPage[]> {
+  if (!pageNumbers.length) return [];
+  if (MOCK_API) {
+    const book = mockBooks.find((item) => item.id === id);
+    if (!book) throw new ApiError("Book not found", 404, "NOT_FOUND");
+    const wanted = new Set(pageNumbers);
+    return structuredClone(
+      (book.pages || [])
+        .filter((page) => wanted.has(page.pageNumber))
+        .sort((a, b) => a.pageNumber - b.pageNumber),
+    );
+  }
+  const pages = await Promise.all(
+    pageNumbers.map((pageNumber) =>
+      request<ApiPage>(`/books/${id}/pages/${pageNumber}`).then(mapPage),
+    ),
+  );
+  pages.sort((a, b) => a.pageNumber - b.pageNumber);
+  return pages;
+}
+
 export const api = {
   async listBooks(): Promise<Book[]> {
     if (MOCK_API) return structuredClone(mockBooks);
@@ -227,23 +251,31 @@ export const api = {
     return response.items.map((book) => mapBook(book));
   },
 
-  async getBook(id: string): Promise<Book> {
+  async getBook(
+    id: string,
+    options: { loadPages?: boolean } = {},
+  ): Promise<Book> {
+    const loadPages = options.loadPages !== false;
     if (MOCK_API) {
       const book = mockBooks.find((item) => item.id === id);
       if (!book) throw new ApiError("Book not found", 404, "NOT_FOUND");
-      return structuredClone(book);
+      const clone = structuredClone(book);
+      const readyPages = (clone.pages || []).map((page) => page.pageNumber);
+      clone.readyPages = readyPages;
+      if (!loadPages) clone.pages = [];
+      return clone;
     }
     const [book, progress] = await Promise.all([
       request<ApiBook>(`/books/${id}`),
       request<ApiProgress>(`/books/${id}/status`),
     ]);
-    const pages = await Promise.all(
-      progress.ready_pages.map((pageNumber) =>
-        request<ApiPage>(`/books/${id}/pages/${pageNumber}`).then(mapPage),
-      ),
-    );
-    pages.sort((a, b) => a.pageNumber - b.pageNumber);
-    return mapBook(book, pages);
+    const readyPages = [...progress.ready_pages].sort((a, b) => a - b);
+    const pages = loadPages ? await loadBookPages(id, readyPages) : [];
+    return { ...mapBook(book, pages), readyPages };
+  },
+
+  async getBookPages(id: string, pageNumbers: number[]): Promise<BookPage[]> {
+    return loadBookPages(id, pageNumbers);
   },
 
   async deleteBook(id: string): Promise<void> {

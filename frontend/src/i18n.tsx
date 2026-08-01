@@ -22,6 +22,8 @@ const messages = {
     signOut: "Sign out",
     bookmarks: "Bookmarks",
     collection: "Your collection",
+    searchLibrary: "Search by title or author",
+    noSearchResults: "No books match your search.",
     sharedComing: "Shared library coming later",
     sharedComingBody:
       "Publishing stays disabled until copyright attestation and moderation are available.",
@@ -128,6 +130,7 @@ const messages = {
     languageEnglish: "English",
     voiceDefault: "Default",
     closeChat: "Close chat",
+    loadingMorePages: "Loading more pages…",
   },
   bo: {
     library: "དཔེ་མཛོད།",
@@ -141,6 +144,8 @@ const messages = {
     signOut: "ཕྱིར་ཐོན།",
     bookmarks: "དེབ་རྟགས།",
     collection: "ཁྱེད་ཀྱི་དཔེ་མཛོད།",
+    searchLibrary: "མཚན་བྱང་ངམ་རྩོམ་པ་པོས་འཚོལ།",
+    noSearchResults: "འཚོལ་ཞིབ་དང་མཐུན་པའི་དཔེ་ཆ་མེད།",
     sharedComing: "མཉམ་སྤྱོད་དཔེ་མཛོད་རྗེས་སུ་འབྱུང་།",
     sharedComingBody:
       "པར་དབང་ངོས་ལེན་དང་ཞིབ་བཤེར་མ་ཚར་བར་དུ་སྤེལ་བཀྲམ་བྱེད་མི་ཐུབ།",
@@ -244,6 +249,7 @@ const messages = {
     languageEnglish: "English",
     voiceDefault: "Default",
     closeChat: "Close chat",
+    loadingMorePages: "Loading more pages…",
   },
 } as const;
 

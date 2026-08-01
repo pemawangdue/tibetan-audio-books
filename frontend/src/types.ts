@@ -28,6 +28,8 @@ export interface Book {
   updatedAt: string
   owner: 'me' | 'shared'
   pages?: BookPage[]
+  /** Ready page numbers from status; used for incremental TOC loading. */
+  readyPages?: number[]
 }
 
 export interface Bookmark {

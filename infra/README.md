@@ -1,44 +1,70 @@
-# Dadhep AWS MVP infrastructure
+# dadhep AWS infrastructure
 
-AWS CDK v2 (Python) provisions the MVP as one independently deployable stack:
+AWS CDK v2 (Python) provisions the MVP as one stack (`Dadhep`): auth, storage, queues, three Lambdas, HTTP API, CloudFront SPA hosting, and an S3 Vectors bucket for RAG.
 
-- Cognito self-service sign-up/sign-in with email or phone aliases.
-- Private, encrypted, versioned uploads, generated-assets, and frontend S3 buckets.
-- An S3 Vectors bucket (`AWS::S3Vectors::VectorBucket`) for per-book RAG indexes.
-- CloudFront with Origin Access Control, HTTPS-only frontend delivery, and SPA
-  route rewriting. Generated audio remains private and is delivered with
-  short-lived, owner-authorized S3 URLs returned by the API.
-- On-demand Books, Pages, and TTL-enabled Cache DynamoDB tables. Books can be
-  queried by owner/creation time or status/update time; Pages can be queried by
-  processing priority or job/page number.
-- Document, priority-page, and standard-page SQS queues, each with an encrypted
-  DLQ. The split worker consumes documents; the page worker consumes both page
-  tiers with priority receiving the larger concurrency allocation.
-- Cognito-authorized HTTP API proxying `/` and `/{proxy+}` to the API Lambda.
-- A reference to the existing `dadhep/monlam-api-key` Secrets Manager secret.
-  CDK does **not** create or populate the secret.
-- Least-privilege grants, X-Ray tracing, one-month Lambda log retention, queue,
-  DLQ, Lambda error/throttle, and API 5xx alarms.
+## High-level inventory
+
+| Area | Resources |
+|------|-----------|
+| **Identity** | Cognito user pool (email/phone aliases, self sign-up); app client; HTTP API JWT authorizer |
+| **Object storage** | Private encrypted versioned S3: uploads, generated assets, frontend |
+| **Vectors** | `AWS::S3Vectors::VectorBucket` (AES256, `RemovalPolicy.RETAIN`) for per-book RAG indexes |
+| **CDN** | CloudFront + OAC, HTTPS, SPA rewrite; audio stays private via short-lived API-issued URLs |
+| **Data** | DynamoDB Books (GSIs: owner+created_at, status+updated_at), Pages (PK book_id / SK page_number), Cache (TTL) |
+| **Queues** | Document, priority-page, standard-page SQS + DLQs |
+| **Compute** | API Lambda, split Lambda, page-worker Lambda (priority + standard event sources) |
+| **Secrets** | Reference to existing `dadhep/monlam-api-key` (CDK does **not** create it) |
+| **Ops** | Least-privilege IAM, X-Ray, ~1 month log retention, DLQ/Lambda/API alarms |
+
+```mermaid
+flowchart TB
+  CF[CloudFront] --> FE[S3 Frontend]
+  CF --> Users
+  Users --> API[HTTP API + Cognito JWT]
+  API --> Lapi[API Lambda]
+  Lapi --> U[S3 Uploads]
+  Lapi --> A[S3 Assets]
+  Lapi --> B[(Dynamob: Books / Pages / Cache)]
+  Lapi --> DQ[Document SQS]
+  Lapi --> V[S3 Vectors]
+  Lapi --> BR[Bedrock Embed]
+  DQ --> Lsplit[Split Lambda]
+  Lsplit --> PQ[Priority SQS]
+  Lsplit --> SQ[Standard SQS]
+  PQ --> Lpage[Page Worker]
+  SQ --> Lpage
+  Lpage --> A
+  Lpage --> B
+  Lpage --> V
+  Lpage --> BR
+  Lpage --> Sec[Secrets Manager Monlam key]
+```
+
+## Use cases (infra)
+
+1. **Host the SPA** — Build `frontend/dist`, deploy static assets + inject `config.js` (API URL, Cognito IDs).  
+2. **Secure the API** — Cognito JWT on protected routes; public `/health` and OpenAPI docs as configured.  
+3. **Run the pipeline** — Wire document → split → priority/standard page queues to the right Lambdas.  
+4. **Enable RAG** — Create the vector bucket; grant API/worker `s3vectors:*` index/vector APIs + `bedrock:InvokeModel` for Titan Embed.  
+5. **Operate safely** — DLQs, reserved concurrency caps, alarms; retain Cognito and the vector bucket on stack delete by default.
 
 ## Source layout
 
-The deployable app intentionally packages sibling application outputs:
+Deployable assets come from sibling packages:
 
-- Lambda code: `../backend`
-- Static frontend: `../frontend/dist`
+| Input | Path |
+|-------|------|
+| Lambda code | `../backend` (bundled with manylinux Python 3.12 wheels; Docker only as CDK fallback) |
+| Frontend | `../frontend/dist` |
 
-The default handlers are `app.handler.handler`, `app.split_worker.handler`, and
-`app.page_worker.handler`. Override them with CDK context keys `apiHandler`,
-`splitHandler`, and `pageWorkerHandler` if the backend module layout differs.
-Both source paths must exist before `cdk synth` or deployment. Tests inject small
-temporary assets and therefore do not require application sources.
-Lambda dependencies, including PyMuPDF, are installed as Python 3.12
-manylinux x86-64 wheels by the local bundler. Docker is used only as CDK's
-fallback when local wheel bundling is unavailable.
+Default handlers: `app.handler.handler`, `app.split_worker.handler`, `app.page_worker.handler`  
+Overrides: CDK context `apiHandler`, `splitHandler`, `pageWorkerHandler`.
 
-## Setup and verification
+Both backend sources and a built frontend must exist before `cdk synth` / `deploy` (tests may inject temp assets).
 
-Run from `infra`:
+## Setup
+
+From `infra/`:
 
 ```powershell
 python -m venv .venv
@@ -48,36 +74,64 @@ pytest
 npx aws-cdk synth
 ```
 
-Bootstrap a target account once, then deploy:
+Bootstrap once, then deploy:
 
 ```powershell
 npx aws-cdk bootstrap aws://ACCOUNT/REGION
+# Ensure frontend is built first:
+#   cd ..\frontend; npm ci; npm run build
 npx aws-cdk deploy
 ```
 
-The named Monlam secret must already exist in the deployment region. Set a
-different name with `-c monlamSecretName=path/to/secret`.
+The Monlam secret must already exist in the region. Override the name with `-c monlamSecretName=path/to/secret`. Default context also sets `monlamProvider=rest` and `monlamApiUrl`.
 
-## Runtime sizing and concurrency
+## Runtime sizing (`cdk.json` defaults)
 
-`cdk.json` contains bounded defaults for each Lambda's memory, timeout,
-ephemeral storage, and reserved concurrency. It also controls SQS batch sizes
-and maximum concurrency. Override any value with `-c key=value`.
+| Function | Memory | Timeout | Ephemeral | Reserved concurrency |
+|----------|--------|---------|-----------|----------------------|
+| API | 1024 MiB | **90 s** | 512 MiB | 200 |
+| Split | 2048 MiB | 300 s | 2048 MiB | 2 |
+| Page worker | 3008 MiB | 300 s | 4096 MiB | 5 |
 
-The following constraints are checked during synthesis:
+SQS event sources (defaults): document / priority / standard batch size `1`, max concurrency `2` each (priority + standard must fit under the worker’s reserved concurrency).
 
-- Lambda memory: 128–10240 MiB
-- Ephemeral storage: 512–10240 MiB
-- API timeout: 1–30 seconds; worker timeouts: 1–900 seconds
-- Event source maximum concurrency is at least 2 and no greater than its
-  Lambda's reserved concurrency
-- Priority plus standard page concurrency cannot exceed the page worker's
-  reserved concurrency
+Override any value with `-c key=value`. Synthesis validates memory/ephemeral ranges and concurrency relationships.
 
-The API currently allows any browser origin because the frontend domain is not
-known until deployment. For production, replace `allow_origins=["*"]` with the
-deployed custom frontend origin.
+Other useful context: `embeddingModelId` (default `amazon.titan-embed-text-v2:0`), `stageName`.
 
-Persistent buckets, Cognito users, and Books/Pages data use `RETAIN` deletion
-policies. Queue and alarm thresholds are MVP defaults and should be tuned from
-observed traffic.
+## Environment injected into Lambdas
+
+Shared (typical): `ENV`, table names, upload/assets bucket names, `VECTOR_BUCKET`, `EMBEDDING_MODEL_ID`, dimensions.
+
+| Lambda | Extra |
+|--------|--------|
+| API | `SPLIT_QUEUE_URL`, Monlam env/secret, Cognito-related settings as used by the app |
+| Split | `PRIORITY_QUEUE_URL`, `PAGE_QUEUE_URL` (standard) |
+| Page worker | Monlam env/secret, `PROCESSING_LEASE_SECONDS` |
+
+API and page-worker roles include Bedrock invoke + S3 Vectors index/vector actions (bucket create is stack-owned).
+
+## Stack outputs
+
+Among others: `ApiUrl`, `CloudFrontUrl`, `CloudFrontDistributionId`, `UserPoolId`, `UserPoolClientId`, upload/assets/frontend bucket names, `VectorBucketName`, `VectorBucketArn`, table names, queue URLs.
+
+## CORS and production hardening
+
+The API currently allows broad browser origins because the frontend hostname is not known until after the first deploy. For production, restrict `allow_origins` to the CloudFront (or custom) origin.
+
+## Removal policies (current stack)
+
+| Resource | Policy |
+|----------|--------|
+| Books / Pages / Cache tables | `DESTROY` (MVP convenience) |
+| Uploads / assets / frontend buckets | `DESTROY` |
+| Cognito user pool | `RETAIN` |
+| S3 Vectors bucket | `RETAIN` |
+
+Treat production data carefully; change policies before real user data if you need retention.
+
+## Notes
+
+- Pages are accessed by `book_id` + `page_number` (no extra Pages GSIs in this stack).  
+- Priority and standard page event sources currently share similar max concurrency defaults (both `2`); raise priority first if you need faster page-1 / correction turnaround.  
+- Requires `aws-cdk-lib` with S3 Vectors L1 support (see `requirements.txt`).  

@@ -20,6 +20,7 @@ import {
   ArrowLeft,
   BookOpen,
   Bookmark,
+  ChevronLeft,
   ChevronRight,
   CircleAlert,
   FileImage,
@@ -33,6 +34,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Search,
   Settings,
   Share2,
   AudioLines,
@@ -150,6 +152,7 @@ function Shell({ children }: { children: ReactNode }) {
 function LibraryPage() {
   const { t } = useI18n();
   const [tab, setTab] = useState<"me" | "shared">("me");
+  const [query, setQuery] = useState("");
   const [books, setBooks] = useState<Book[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   useEffect(() => {
@@ -161,7 +164,15 @@ function LibraryPage() {
       })
       .catch(() => setState("error"));
   }, []);
-  const shown = books.filter((book) => book.owner === tab);
+  const inTab = books.filter((book) => book.owner === tab);
+  const needle = query.trim().toLowerCase();
+  const shown = needle
+    ? inTab.filter(
+        (book) =>
+          book.title.toLowerCase().includes(needle) ||
+          (book.author || "").toLowerCase().includes(needle),
+      )
+    : inTab;
   return (
     <main className="container">
       <div className="title-row">
@@ -174,6 +185,16 @@ function LibraryPage() {
           {t("upload")}
         </Link>
       </div>
+      <label className="library-search">
+        <Search />
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t("searchLibrary")}
+          aria-label={t("searchLibrary")}
+        />
+      </label>
       <div className="tabs" role="tablist">
         <button
           role="tab"
@@ -191,19 +212,23 @@ function LibraryPage() {
         </button>
       </div>
       {state === "loading" ? (
-        <div className="book-grid" aria-label="Loading books">
-          {[1, 2, 3].map((n) => (
+        <BookScroller key="loading" ariaLabel="Loading books">
+          {[1, 2, 3, 4].map((n) => (
             <div className="book-card skeleton" key={n} />
           ))}
-        </div>
+        </BookScroller>
       ) : state === "error" ? (
         <ErrorState message="Could not load your library." />
-      ) : shown.length ? (
-        <div className="book-grid">
-          {shown.map((book) => (
-            <BookCard key={book.id} book={book} />
-          ))}
-        </div>
+      ) : inTab.length ? (
+        shown.length ? (
+          <BookScroller key={tab} ariaLabel={t("library")}>
+            {shown.map((book, index) => (
+              <BookCard key={book.id} book={book} index={index} />
+            ))}
+          </BookScroller>
+        ) : (
+          <p className="muted library-search-empty">{t("noSearchResults")}</p>
+        )
       ) : tab === "shared" ? (
         <SharedUnavailable />
       ) : (
@@ -212,6 +237,78 @@ function LibraryPage() {
     </main>
   );
 }
+
+function BookScroller({
+  children,
+  ariaLabel,
+}: {
+  children: ReactNode;
+  ariaLabel: string;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollState = () => {
+    const track = trackRef.current;
+    if (!track) return;
+    const maxScroll = track.scrollWidth - track.clientWidth;
+    setCanScrollLeft(track.scrollLeft > 4);
+    setCanScrollRight(track.scrollLeft < maxScroll - 4);
+  };
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const frame = requestAnimationFrame(updateScrollState);
+    const onScroll = () => updateScrollState();
+    track.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", updateScrollState);
+    const observer = new ResizeObserver(updateScrollState);
+    observer.observe(track);
+    return () => {
+      cancelAnimationFrame(frame);
+      track.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", updateScrollState);
+      observer.disconnect();
+    };
+  }, [children]);
+
+  const scrollByCards = (direction: -1 | 1) => {
+    const track = trackRef.current;
+    if (!track) return;
+    const card = track.querySelector(".book-card") as HTMLElement | null;
+    const step = card ? card.offsetWidth + 18 : track.clientWidth * 0.75;
+    track.scrollBy({ left: direction * step * 2, behavior: "smooth" });
+  };
+
+  return (
+    <div className="book-scroller">
+      <button
+        type="button"
+        className="book-scroll-btn prev"
+        aria-label="Scroll left"
+        disabled={!canScrollLeft}
+        onClick={() => scrollByCards(-1)}
+      >
+        <ChevronLeft />
+      </button>
+      <div className="book-scroller-track" ref={trackRef} aria-label={ariaLabel}>
+        {children}
+      </div>
+      <button
+        type="button"
+        className="book-scroll-btn next"
+        aria-label="Scroll right"
+        disabled={!canScrollRight}
+        onClick={() => scrollByCards(1)}
+      >
+        <ChevronRight />
+      </button>
+    </div>
+  );
+}
+
 function EmptyLibrary() {
   const { t } = useI18n();
   return (
@@ -240,37 +337,101 @@ function SharedUnavailable() {
     </section>
   );
 }
-function BookCard({ book }: { book: Book }) {
+function BookCard({ book, index = 0 }: { book: Book; index?: number }) {
   const inProgress = book.status !== "ready" && book.status !== "failed";
   return (
     <Link
-      className="book-card"
+      className="book-card book-card-enter from-bottom"
+      style={{ animationDelay: `${Math.min(index, 10) * 70}ms` }}
       to={book.status === "ready" ? `/books/${book.id}` : `/jobs/${book.id}`}
     >
-      <div className="book-cover">
+      <div className={`book-cover${book.coverUrl ? "" : " no-cover"}`}>
         {book.coverUrl ? <img src={book.coverUrl} alt="" /> : <span>ཨ</span>}
         {book.status !== "ready" && (
-          <span className={`status ${book.status}`}>{book.status}</span>
+          <span
+            className={`status ${book.status}${inProgress ? " status-live" : ""}`}
+          >
+            {book.status}
+            {inProgress ? ` · ${book.progress || 0}%` : ""}
+          </span>
         )}
       </div>
       <div className="book-info">
         <h2>{book.title}</h2>
         {book.author && <p>{book.author}</p>}
-        {inProgress && (
-          <progress
-            aria-label={`${book.title} processing progress`}
-            max="100"
-            value={book.progress || 0}
-          />
-        )}
         <div className="book-meta">
           <span>{book.pageCount} pages</span>
-          {inProgress && <span>{book.progress || 0}%</span>}
           <ChevronRight />
         </div>
       </div>
     </Link>
   );
+}
+
+function titleFromFilename(name: string): string {
+  return name
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodePdfLiteral(value: string): string {
+  return value
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\r")
+    .replace(/\\t/g, "\t")
+    .replace(/\\\(/g, "(")
+    .replace(/\\\)/g, ")")
+    .replace(/\\\\/g, "\\")
+    .replace(/\\([0-7]{1,3})/g, (_, oct) =>
+      String.fromCharCode(Number.parseInt(oct, 8)),
+    )
+    .trim();
+}
+
+function decodePdfHexTitle(hex: string): string {
+  const clean = hex.replace(/\s+/g, "");
+  if (clean.length < 4 || clean.length % 2 !== 0) return "";
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+    const chars: string[] = [];
+    for (let i = 2; i + 1 < bytes.length; i += 2) {
+      chars.push(String.fromCharCode((bytes[i] << 8) | bytes[i + 1]));
+    }
+    return chars.join("").trim();
+  }
+  return Array.from(bytes, (byte) => String.fromCharCode(byte)).join("").trim();
+}
+
+function findPdfTitleInBytes(bytes: Uint8Array): string | null {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i]);
+  const literal = text.match(/\/Title\s*\(((?:\\.|[^\\)])*)\)/);
+  if (literal?.[1]) {
+    const decoded = decodePdfLiteral(literal[1]);
+    if (decoded) return decoded;
+  }
+  const hex = text.match(/\/Title\s*<([0-9A-Fa-f\s]+)>/);
+  if (hex?.[1]) {
+    const decoded = decodePdfHexTitle(hex[1]);
+    if (decoded) return decoded;
+  }
+  return null;
+}
+
+async function titleFromPdf(file: File): Promise<string | null> {
+  const headSize = Math.min(file.size, 512 * 1024);
+  const head = new Uint8Array(await file.slice(0, headSize).arrayBuffer());
+  const fromHead = findPdfTitleInBytes(head);
+  if (fromHead) return fromHead;
+  if (file.size <= headSize) return null;
+  const tailStart = Math.max(0, file.size - 128 * 1024);
+  const tail = new Uint8Array(await file.slice(tailStart).arrayBuffer());
+  return findPdfTitleInBytes(tail);
 }
 
 function UploadPage() {
@@ -281,7 +442,7 @@ function UploadPage() {
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  function pick(event: ChangeEvent<HTMLInputElement>) {
+  async function pick(event: ChangeEvent<HTMLInputElement>) {
     const all = Array.from(event.target.files || []);
     const valid = all.filter(
       (f) => f.type === "application/pdf" || f.type.startsWith("image/"),
@@ -289,7 +450,14 @@ function UploadPage() {
     const invalidMix =
       valid.length > 1 && valid.some((f) => f.type === "application/pdf");
     setFiles(invalidMix ? [] : valid);
-    if (valid.length && !title) setTitle(valid[0].name.replace(/\.[^.]+$/, ""));
+    if (!invalidMix && valid.length) {
+      const fallback = titleFromFilename(valid[0].name);
+      setTitle(fallback);
+      if (valid[0].type === "application/pdf") {
+        const pdfTitle = await titleFromPdf(valid[0]);
+        if (pdfTitle) setTitle(pdfTitle.slice(0, 300));
+      }
+    }
     setError(
       invalidMix
         ? "Choose one PDF or a collection of images, not both."
@@ -325,7 +493,7 @@ function UploadPage() {
       await api.putFile(signed, uploadFile, setProgress);
       const job = await api.startProcessing(
         signed,
-        title.trim() || files[0].name.replace(/\.[^.]+$/, ""),
+        title.trim() || titleFromFilename(files[0].name),
       );
       navigate(`/jobs/${job.id}`);
     } catch (e) {
@@ -342,7 +510,7 @@ function UploadPage() {
       <p className="eyebrow">{t("newAudiobook")}</p>
       <h1>{t("uploadTitle")}</h1>
       <p className="lead">{t("uploadHelp")}</p>
-      <label>
+      <label className="upload-title-field">
         {t("bookTitle")}
         <input
           value={title}
@@ -453,6 +621,8 @@ function ProcessingPage() {
   );
 }
 
+const DETAILS_PAGE_BATCH = 10;
+
 function DetailsPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -461,13 +631,92 @@ function DetailsPage() {
     [error, setError] = useState(""),
     [confirmDelete, setConfirmDelete] = useState(false),
     [deleting, setDeleting] = useState(false),
-    [deleteError, setDeleteError] = useState("");
+    [deleteError, setDeleteError] = useState(""),
+    [readyPages, setReadyPages] = useState<number[]>([]),
+    [loadingMore, setLoadingMore] = useState(false);
+  const tocSentinelRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
+  const loadedCountRef = useRef(0);
+  const readyPagesRef = useRef<number[]>([]);
+
   useEffect(() => {
+    let cancelled = false;
+    setBook(null);
+    setReadyPages([]);
+    readyPagesRef.current = [];
+    loadedCountRef.current = 0;
+    setError("");
     api
-      .getBook(id)
-      .then(setBook)
-      .catch((e) => setError(e.message));
+      .getBook(id, { loadPages: false })
+      .then(async (next) => {
+        if (cancelled) return;
+        const ready = next.readyPages || [];
+        readyPagesRef.current = ready;
+        setReadyPages(ready);
+        const firstBatch = ready.slice(0, DETAILS_PAGE_BATCH);
+        if (!firstBatch.length) {
+          setBook(next);
+          return;
+        }
+        const pages = await api.getBookPages(id, firstBatch);
+        if (cancelled) return;
+        loadedCountRef.current = pages.length;
+        setBook({ ...next, pages });
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
+
+  const loadMorePages = async () => {
+    if (loadingMoreRef.current) return;
+    const loadedCount = loadedCountRef.current;
+    const nextNumbers = readyPagesRef.current.slice(
+      loadedCount,
+      loadedCount + DETAILS_PAGE_BATCH,
+    );
+    if (!nextNumbers.length) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const pages = await api.getBookPages(id, nextNumbers);
+      loadedCountRef.current = loadedCount + pages.length;
+      setBook((current) => {
+        if (!current) return current;
+        const merged = [...(current.pages || []), ...pages].sort(
+          (a, b) => a.pageNumber - b.pageNumber,
+        );
+        return { ...current, pages: merged };
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("somethingWrong"));
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  };
+
+  const loadedCount = book?.pages?.length || 0;
+  const hasMorePages = loadedCount < readyPages.length;
+
+  useEffect(() => {
+    const sentinel = tocSentinelRef.current;
+    if (!sentinel || !book || !hasMorePages) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void loadMorePages();
+        }
+      },
+      { root: null, rootMargin: "240px 0px", threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [book, hasMorePages, loadedCount, id]);
+
   const deleteBook = async () => {
     setDeleting(true);
     setDeleteError("");
@@ -549,7 +798,7 @@ function DetailsPage() {
               <div className="section-heading">
                 <h2>{t("availablePages")}</h2>
                 <span>
-                  {book.pages?.length || 0} of {book.pageCount}
+                  {loadedCount} of {readyPages.length || book.pageCount}
                 </span>
               </div>
               {book.pages?.map((page) => (
@@ -571,6 +820,13 @@ function DetailsPage() {
                   <ChevronRight />
                 </Link>
               ))}
+              {hasMorePages && (
+                <div className="toc-sentinel" ref={tocSentinelRef}>
+                  {loadingMore ? (
+                    <p className="muted">{t("loadingMorePages")}</p>
+                  ) : null}
+                </div>
+              )}
             </section>
           </div>
           {showChat && <BookChatPanel bookId={book.id} />}
