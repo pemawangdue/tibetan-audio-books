@@ -136,19 +136,29 @@ const samplePages: BookPage[] = [
   },
 ];
 
-const mockBooks: Book[] = [
-  {
-    id: "sample",
-    title: "A Path of Compassion",
-    status: "ready",
-    pageCount: 1,
-    updatedAt: new Date().toISOString(),
-    owner: "me",
-    pages: samplePages,
-  },
-];
+function createMockBooks(): Book[] {
+  return [
+    {
+      id: "sample",
+      title: "A Path of Compassion",
+      status: "ready",
+      pageCount: 1,
+      updatedAt: new Date().toISOString(),
+      owner: "me",
+      pages: samplePages,
+    },
+  ];
+}
+
+let mockBooks = createMockBooks();
 const mockJobs = new Map<string, ProcessingJob>();
 const uploads = new Map<string, PresignedUpload>();
+
+export function resetMockApi() {
+  mockBooks = createMockBooks();
+  mockJobs.clear();
+  uploads.clear();
+}
 
 function mapStatus(status: ApiBook["status"]): Book["status"] {
   if (status === "completed" || status === "partial") return "ready";
@@ -223,6 +233,16 @@ export const api = {
     );
     pages.sort((a, b) => a.pageNumber - b.pageNumber);
     return mapBook(book, pages);
+  },
+
+  async deleteBook(id: string): Promise<void> {
+    if (MOCK_API) {
+      const index = mockBooks.findIndex((item) => item.id === id);
+      if (index < 0) throw new ApiError("Book not found", 404, "NOT_FOUND");
+      mockBooks.splice(index, 1);
+      return;
+    }
+    await request(`/books/${id}`, { method: "DELETE" });
   },
 
   async createUpload(input: UploadRequest): Promise<PresignedUpload> {

@@ -11,7 +11,7 @@ from mutagen.mp3 import MP3
 from .aws import Aws, get_aws
 from .config import Settings, get_settings
 from .models import BookStatus, JobMessage, PageStatus, utc_now
-from .providers import MonlamProvider, get_provider, sentence_segments
+from .providers import Provider, get_provider, sentence_segments
 from .repositories import Repositories
 
 
@@ -49,7 +49,7 @@ def _cached_text(
 
 def _tts_asset(
     text: str,
-    provider: MonlamProvider,
+    provider: Provider,
     aws: Aws,
     settings: Settings,
 ) -> tuple[str, bytes]:
@@ -99,7 +99,7 @@ def process_page(
     message: JobMessage,
     aws: Aws,
     settings: Settings,
-    provider: MonlamProvider | None = None,
+    provider: Provider | None = None,
 ) -> None:
     if message.kind != "page" or message.page_number is None or not message.image_key:
         raise ValueError("Invalid page message")
@@ -146,6 +146,7 @@ def process_page(
         settings.model_copy(update={"monlam_voice": message.tts_voice})
     )
     try:
+        # Perform OCR, cleanup, and TTS
         image = aws.s3.get_object(
             Bucket=settings.assets_bucket, Key=message.image_key
         )["Body"].read()
@@ -167,12 +168,12 @@ def process_page(
         elapsed_ms = 0
         for index, sentence in enumerate(sentence_segments(text)):
             _, audio = _tts_asset(sentence, provider, aws, settings)
-            segment_key = f"{version_prefix}/segments/{index:04d}.mp3"
-            aws.s3.put_object(
+            segment_key = f"{version_prefix}/segments/{index:04d}.wav"
+            aws.s3.put_object(                
                 Bucket=settings.assets_bucket,
                 Key=segment_key,
                 Body=audio,
-                ContentType="audio/mpeg",
+                ContentType="audio/wav",
                 ServerSideEncryption="AES256",
             )
             duration_ms = _duration_ms(audio, sentence)
@@ -187,13 +188,13 @@ def process_page(
             )
             elapsed_ms += duration_ms
         _, full_audio = _tts_asset(text, provider, aws, settings)
-        audio_key = f"{version_prefix}/audio.mp3"
+        audio_key = f"{version_prefix}/audio.wav"
         segments_key = f"{version_prefix}/segments.json"
         aws.s3.put_object(
             Bucket=settings.assets_bucket,
             Key=audio_key,
             Body=full_audio,
-            ContentType="audio/mpeg",
+            ContentType="audio/wav",
             ServerSideEncryption="AES256",
         )
         aws.s3.put_object(

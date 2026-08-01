@@ -285,7 +285,7 @@ class DadhepStack(Stack):
                 "MONLAM_API_URL": str(
                     self.node.try_get_context("monlamApiUrl") or ""
                 ),
-                "MONLAM_API_KEY": monlam_secret.secret_value.unsafe_unwrap(),
+                "MONLAM_API_KEY": monlam_secret.secret_value_from_json("key").unsafe_unwrap(),
                 "PROCESSING_LEASE_SECONDS": str(worker_timeout + 30),
             },
         )

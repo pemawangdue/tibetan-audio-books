@@ -30,11 +30,11 @@ class Settings(BaseSettings):
     monlam_provider: Literal["mock", "rest"] = "mock"
     monlam_api_url: str = ""
     monlam_api_key: str = Field(default="", repr=False)
-    monlam_api_key_header: str = "Authorization"
-    monlam_ocr_path: str = "/ocr"
-    monlam_cleanup_path: str = "/cleanup"
-    monlam_tts_path: str = "/tts"
-    monlam_voice: str = "default"
+    monlam_api_key_header: str = "X-API-Key"
+    monlam_ocr_path: str = "/ocr/single-page"
+    monlam_cleanup_path: str = ""  # unused; Monlam has no cleanup endpoint
+    monlam_tts_path: str = "/text-to-speech/"
+    monlam_voice: Literal["lhasa_female", "lhasa_male", "amdo_female", "amdo_male", "kham_female", "kham_male"] = "lhasa_male"
     monlam_timeout_seconds: float = 60
     presigned_url_ttl: int = 900
     max_upload_bytes: int = 50 * 1024 * 1024

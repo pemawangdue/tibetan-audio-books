@@ -1,12 +1,16 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { resetMockApi } from './api'
 import App from './App'
 
 const mockUser = { id: 'test-user', email: 'reader@example.org', name: 'Reader' }
 
 describe('dadhep frontend', () => {
-  beforeEach(() => localStorage.setItem('dadhep.mock-user', JSON.stringify(mockUser)))
+  beforeEach(() => {
+    localStorage.setItem('dadhep.mock-user', JSON.stringify(mockUser))
+    resetMockApi()
+  })
 
   it('shows My Uploads and keeps shared publishing unavailable', async () => {
     window.history.pushState({}, '', '/library')
@@ -50,5 +54,18 @@ describe('dadhep frontend', () => {
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Language' }), 'bo')
     expect(localStorage.getItem('dadhep.language')).toBe('bo')
     expect(screen.getByText('དཔེ་མཛོད།')).toBeVisible()
+  })
+
+  it('deletes a book from the details page after confirmation', async () => {
+    window.history.pushState({}, '', '/books/sample')
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'A Path of Compassion' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Delete book' }))
+    const dialog = screen.getByRole('dialog', { name: 'Delete book' })
+    expect(dialog).toBeVisible()
+    await user.click(within(dialog).getByRole('button', { name: 'Delete book' }))
+    await waitFor(() => expect(window.location.pathname).toBe('/library'))
+    expect(await screen.findByText('Your listening library starts here')).toBeVisible()
   })
 })

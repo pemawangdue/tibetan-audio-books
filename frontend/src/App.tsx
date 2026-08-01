@@ -38,6 +38,7 @@ import {
   Share2,
   SkipBack,
   SkipForward,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -448,15 +449,30 @@ function ProcessingPage() {
 
 function DetailsPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const { t } = useI18n();
   const [book, setBook] = useState<Book | null>(null),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [confirmDelete, setConfirmDelete] = useState(false),
+    [deleting, setDeleting] = useState(false),
+    [deleteError, setDeleteError] = useState("");
   useEffect(() => {
     api
       .getBook(id)
       .then(setBook)
       .catch((e) => setError(e.message));
   }, [id]);
+  const deleteBook = async () => {
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await api.deleteBook(id);
+      navigate("/library", { replace: true });
+    } catch {
+      setDeleteError(t("deleteFailed"));
+      setDeleting(false);
+    }
+  };
   if (error) return <ErrorState message={error} />;
   if (!book) return <div className="center-screen">{t("openingBook")}</div>;
   return (
@@ -490,6 +506,13 @@ function DetailsPage() {
               <Share2 />
               {t("sharedComing")}
             </button>
+            <button
+              className="danger-button"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 />
+              {t("deleteBook")}
+            </button>
           </div>
         </div>
       </section>
@@ -516,7 +539,73 @@ function DetailsPage() {
           </Link>
         ))}
       </section>
+      {confirmDelete && (
+        <DeleteBookModal
+          title={book.title}
+          busy={deleting}
+          error={deleteError}
+          close={() => !deleting && setConfirmDelete(false)}
+          confirm={deleteBook}
+        />
+      )}
     </main>
+  );
+}
+
+function DeleteBookModal({
+  title,
+  busy,
+  error,
+  close,
+  confirm,
+}: {
+  title: string;
+  busy: boolean;
+  error: string;
+  close(): void;
+  confirm(): void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="modal-backdrop" onMouseDown={close}>
+      <section
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-book-title"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="section-heading">
+          <h2 id="delete-book-title">{t("deleteBook")}</h2>
+          <button
+            className="icon-button"
+            aria-label="Close"
+            onClick={close}
+            disabled={busy}
+          >
+            <X />
+          </button>
+        </div>
+        <p className="muted">{t("deleteBookHelp")}</p>
+        <p>
+          <strong>{title}</strong>
+        </p>
+        {error && <p className="error-text">{error}</p>}
+        <div className="actions end">
+          <button className="secondary" onClick={close} disabled={busy}>
+            {t("cancel")}
+          </button>
+          <button
+            className="danger-button"
+            onClick={confirm}
+            disabled={busy}
+          >
+            <Trash2 />
+            {busy ? t("deleting") : t("deleteBook")}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -979,7 +1068,7 @@ function BookmarksPage() {
 function SettingsPage() {
   const { user, signOut, mode } = useAuth(),
     { language, setLanguage, t } = useI18n();
-  const [voice, setVoice] = useState(store.get("dadhep.voice", "default")),
+  const [voice, setVoice] = useState(store.get("dadhep.voice", "lhasaFemale")),
     [defaultSpeed, setDefaultSpeed] = useState(store.get("dadhep.speed", 1));
   return (
     <main className="container narrow">
@@ -1025,7 +1114,12 @@ function SettingsPage() {
               store.set("dadhep.voice", e.target.value);
             }}
           >
-            <option value="default">{t("defaultTibetan")}</option>
+            <option value="lhasa_female">{t("lhasaFemale")}</option>
+            <option value="lhasa_male">{t("lhasaMale")}</option>
+            <option value="amdo_female">{t("amdoFemale")}</option>
+            <option value="amdo_male">{t("amdoMale")}</option>
+            <option value="kham_female">{t("khamFemale")}</option>
+            <option value="kham_male">{t("khamMale")}</option>
           </select>
         </div>
         <div className="setting-row">
