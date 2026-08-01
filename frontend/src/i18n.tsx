@@ -2,6 +2,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -200,6 +201,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>(
     () => (localStorage.getItem("dadhep.language") as Language) || "en",
   );
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
   const value = useMemo(
     () => ({
       language,

@@ -9,6 +9,8 @@ const mockUser = { id: 'test-user', email: 'reader@example.org', name: 'Reader' 
 describe('dadhep frontend', () => {
   beforeEach(() => {
     localStorage.setItem('dadhep.mock-user', JSON.stringify(mockUser))
+    localStorage.removeItem('dadhep.language')
+    document.documentElement.lang = 'en'
     resetMockApi()
   })
 
@@ -53,6 +55,7 @@ describe('dadhep frontend', () => {
     render(<App />)
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Language' }), 'bo')
     expect(localStorage.getItem('dadhep.language')).toBe('bo')
+    expect(document.documentElement.lang).toBe('bo')
     expect(screen.getByText('དཔེ་མཛོད།')).toBeVisible()
   })
 
