@@ -73,9 +73,29 @@ class Book(BaseModel):
     cover_page_key: str | None = None
     cover_url: str | None = None
     visibility: Literal["private", "shared"] = "private"
+    index_status: Literal["pending", "indexing", "ready", "failed"] | None = None
+    indexed_chunks: int | None = None
+    indexed_at: str | None = None
+    index_error: str | None = None
     created_at: str
     updated_at: str
     error: str | None = None
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant", "system"]
+    content: str = Field(min_length=1, max_length=20_000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=8_000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=20)
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    citations: list[int] = Field(default_factory=list)
+    index_status: str | None = None
 
 
 class BookList(BaseModel):

@@ -5,6 +5,7 @@ import zipfile
 from typing import Iterable
 
 import fitz
+from PIL import Image
 
 from .aws import Aws, get_aws
 from .config import Settings, get_settings
@@ -14,6 +15,24 @@ from .repositories import Repositories
 
 logger = logging.getLogger(__name__)
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+THUMBNAIL_SIZE = 512
+THUMBNAIL_BACKGROUND = (255, 255, 255)
+
+
+def make_square_thumbnail(
+    image_bytes: bytes,
+    size: int = THUMBNAIL_SIZE,
+    background: tuple[int, int, int] = THUMBNAIL_BACKGROUND,
+) -> bytes:
+    with Image.open(io.BytesIO(image_bytes)) as source:
+        source = source.convert("RGB")
+        source.thumbnail((size, size), Image.LANCZOS)
+        canvas = Image.new("RGB", (size, size), background)
+        offset = ((size - source.width) // 2, (size - source.height) // 2)
+        canvas.paste(source, offset)
+        buffer = io.BytesIO()
+        canvas.save(buffer, format="PNG", optimize=True)
+        return buffer.getvalue()
 
 
 def render_document(data: bytes, max_pages: int = 500) -> Iterable[bytes]:
@@ -62,6 +81,14 @@ def process_split(message: JobMessage, aws: Aws, settings: Settings) -> None:
     now = utc_now()
     page_jobs: list[JobMessage] = []
     for page_number, image in enumerate(images, start=1):
+        if page_number == 1:
+            aws.s3.put_object(
+                Bucket=settings.assets_bucket,
+                Key=f"books/{message.book_id}/pages/cover-thumb.png",
+                Body=make_square_thumbnail(image),
+                ContentType="image/png",
+                ServerSideEncryption="AES256",
+            )
         image_key = f"books/{message.book_id}/pages/{page_number}/source.png"
         aws.s3.put_object(
             Bucket=settings.assets_bucket,
@@ -103,7 +130,7 @@ def process_split(message: JobMessage, aws: Aws, settings: Settings) -> None:
         {
             ":status": BookStatus.PROCESSING.value,
             ":total": len(images),
-            ":cover": f"books/{message.book_id}/pages/1/source.png",
+            ":cover": f"books/{message.book_id}/pages/cover-thumb.png",
             ":now": utc_now(),
         },
         {"#s": "status"},

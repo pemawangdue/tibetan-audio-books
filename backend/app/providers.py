@@ -23,6 +23,9 @@ class Provider(ABC):
     @abstractmethod
     def tts(self, text: str) -> bytes: ...
 
+    def chat(self, messages: list[dict[str, str]]) -> str:
+        raise NotImplementedError
+
 
 def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
@@ -75,6 +78,13 @@ class MockMonlamProvider(Provider):
         # Test-safe deterministic stand-in, not intended to be decoded as real MP3.
         return b"MOCK-MP3\x00" + hashlib.sha256(text.encode("utf-8")).digest()
 
+    def chat(self, messages: list[dict[str, str]]) -> str:
+        user = next(
+            (item["content"] for item in reversed(messages) if item.get("role") == "user"),
+            "",
+        )
+        return f"Mock answer about the book for: {user[:180]}"
+
 
 class MonlamProvider(Provider):
     """Adapter for the Monlam REST API (OCR + TTS)."""
@@ -98,6 +108,8 @@ class MonlamProvider(Provider):
         )
         self.ocr_path = settings.monlam_ocr_path
         self.tts_path = settings.monlam_tts_path
+        self.chat_path = settings.monlam_chat_path
+        self.chat_model = settings.monlam_chat_model
         self.voice = settings.monlam_voice
         self.name = f"rest-v1:{self.voice}"
 
@@ -138,6 +150,23 @@ class MonlamProvider(Provider):
         audio_response = httpx.get(audio_url, timeout=self.client.timeout)
         _raise_for_status(audio_response)
         return audio_response.content
+
+    def chat(self, messages: list[dict[str, str]]) -> str:
+        response = self.client.post(
+            self.chat_path,
+            json={"model_name": self.chat_model, "messages": messages},
+        )
+        _raise_for_status(response)
+        data = response.json()
+        for key in ("response", "content", "answer", "message"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                nested = value.get("content")
+                if isinstance(nested, str) and nested.strip():
+                    return nested.strip()
+        raise ValueError(f"Monlam chat response missing text: {data}")
 
 
 def get_provider(settings: Settings) -> Provider:

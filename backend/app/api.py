@@ -15,6 +15,8 @@ from .models import (
     BookList,
     BookProgress,
     BookStatus,
+    ChatRequest,
+    ChatResponse,
     JobMessage,
     Page,
     PageCorrection,
@@ -25,6 +27,8 @@ from .models import (
     UploadUrlResponse,
     utc_now,
 )
+from .providers import get_provider
+from .rag import build_context, delete_book_index, index_book, retrieve_chunks
 from .repositories import Repositories
 
 
@@ -331,6 +335,99 @@ def correct_page(
     return updated
 
 
+@router.post("/books/{book_id}/chat", response_model=ChatResponse)
+def chat_about_book(
+    book_id: str,
+    payload: ChatRequest,
+    user: Principal = Depends(current_user),
+    aws: Aws = Depends(get_aws),
+    settings: Settings = Depends(get_settings),
+    repos: Repositories = Depends(get_repositories),
+) -> ChatResponse:
+    book = repos.get_book(book_id, user.user_id)
+    if book.status not in {BookStatus.COMPLETED, BookStatus.PARTIAL}:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Chat is available after the book finishes processing",
+        )
+    if not settings.vector_bucket:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Vector knowledge base is not configured",
+        )
+    if book.index_status == "indexing":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Knowledge base is still indexing. Try again shortly.",
+        )
+    if book.index_status != "ready":
+        try:
+            index_book(aws, settings, repos, book_id, user.user_id)
+            book = repos.get_book(book_id, user.user_id)
+        except Exception as exc:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                book.index_error or f"Unable to build knowledge base: {exc}",
+            ) from exc
+        if book.index_status != "ready":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                book.index_error or "Knowledge base is not ready for this book",
+            )
+    try:
+        hits = retrieve_chunks(aws, settings, book_id, payload.message)
+    except ClientError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"Unable to search book knowledge base: {exc}",
+        ) from exc
+    context = build_context(hits)
+    if not context.strip():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "No indexed text was found for this book yet",
+        )
+    citations = sorted(
+        {
+            int(item["metadata"]["page"])
+            for item in hits
+            if isinstance(item.get("metadata"), dict)
+            and item["metadata"].get("page") is not None
+        }
+    )
+    system = (
+        "You are a careful assistant for a Tibetan audiobook. "
+        "Answer only using the provided book excerpts. "
+        "If the excerpts do not contain the answer, say you cannot find it in the book. "
+        "Prefer Tibetan when the user writes in Tibetan. "
+        "Cite page numbers when helpful.\n\n"
+        f"Book title: {book.title}\n\n"
+        f"Book excerpts:\n{context}"
+    )
+    history = [
+        {"role": item.role, "content": item.content}
+        for item in payload.history
+        if item.role in {"user", "assistant"}
+    ][-12:]
+    messages = [
+        {"role": "system", "content": system},
+        *history,
+        {"role": "user", "content": payload.message},
+    ]
+    try:
+        answer = get_provider(settings).chat(messages)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Chat provider failed: {exc}",
+        ) from exc
+    return ChatResponse(
+        answer=answer,
+        citations=citations,
+        index_status=book.index_status,
+    )
+
+
 @router.delete("/books/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_book(
     book_id: str,
@@ -341,6 +438,7 @@ def delete_book(
 ) -> Response:
     book = repos.get_book(book_id, user.user_id)
     repos.delete_pages(book_id)
+    delete_book_index(aws, settings, book_id)
     for bucket, prefix in (
         (settings.assets_bucket, f"books/{book_id}/"),
         (settings.upload_bucket, book.source_key),

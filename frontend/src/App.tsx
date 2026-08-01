@@ -29,15 +29,20 @@ import {
   Library,
   Menu,
   Moon,
-  MoreVertical,
   Pause,
   Play,
   Plus,
   RotateCcw,
   Settings,
   Share2,
+  AudioLines,
+  Calendar,
+  Clock,
+  Headphones,
+  Send,
   SkipBack,
   SkipForward,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -49,6 +54,7 @@ import { I18nProvider, useI18n } from "./i18n";
 import type {
   Book,
   Bookmark as SavedBookmark,
+  ChatMessage,
   ProcessingJob,
   SentenceSegment,
 } from "./types";
@@ -81,34 +87,32 @@ function Shell({ children }: { children: ReactNode }) {
   const reader = useLocation().pathname.endsWith("/read");
   return (
     <div className="app-shell">
-      {!reader && (
-        <header className="topbar">
-          <Link to="/library" className="brand">
-            <span className="brand-mark small">ད</span>dadhep
-          </Link>
-          <button
-            className="icon-button mobile-only"
-            aria-label="Open menu"
-            onClick={() => setMenu(!menu)}
-          >
-            <Menu />
-          </button>
-          <nav className={menu ? "nav open" : "nav"}>
-            <NavLink to="/library">
-              <Library />
-              {t("library")}
-            </NavLink>
-            <NavLink to="/bookmarks">
-              <Bookmark />
-              {t("bookmarks")}
-            </NavLink>
-            <NavLink to="/settings">
-              <Settings />
-              {t("settings")}
-            </NavLink>
-          </nav>
-        </header>
-      )}
+      <header className="topbar">
+        <Link to="/library" className="brand">
+          <span className="brand-mark small">ད</span>dadhep
+        </Link>
+        <button
+          className="icon-button mobile-only"
+          aria-label="Open menu"
+          onClick={() => setMenu(!menu)}
+        >
+          <Menu />
+        </button>
+        <nav className={menu ? "nav open" : "nav"}>
+          <NavLink to="/library">
+            <Library />
+            {t("library")}
+          </NavLink>
+          <NavLink to="/bookmarks">
+            <Bookmark />
+            {t("bookmarks")}
+          </NavLink>
+          <NavLink to="/settings">
+            <Settings />
+            {t("settings")}
+          </NavLink>
+        </nav>
+      </header>
       <div className={player && !reader ? "page-with-player" : ""}>
         {children}
       </div>
@@ -237,6 +241,7 @@ function SharedUnavailable() {
   );
 }
 function BookCard({ book }: { book: Book }) {
+  const inProgress = book.status !== "ready" && book.status !== "failed";
   return (
     <Link
       className="book-card"
@@ -250,8 +255,8 @@ function BookCard({ book }: { book: Book }) {
       </div>
       <div className="book-info">
         <h2>{book.title}</h2>
-        <p>{book.author || `${book.pageCount} pages`}</p>
-        {book.status !== "ready" && (
+        {book.author && <p>{book.author}</p>}
+        {inProgress && (
           <progress
             aria-label={`${book.title} processing progress`}
             max="100"
@@ -260,6 +265,7 @@ function BookCard({ book }: { book: Book }) {
         )}
         <div className="book-meta">
           <span>{book.pageCount} pages</span>
+          {inProgress && <span>{book.progress || 0}%</span>}
           <ChevronRight />
         </div>
       </div>
@@ -475,70 +481,101 @@ function DetailsPage() {
   };
   if (error) return <ErrorState message={error} />;
   if (!book) return <div className="center-screen">{t("openingBook")}</div>;
+  const showChat = book.status === "ready";
   return (
-    <main className="container">
-      <Link to="/library" className="back">
-        <ArrowLeft />
-        {t("library")}
-      </Link>
-      <section className="book-hero">
-        <div className="book-cover large">
-          {book.coverUrl ? <img src={book.coverUrl} alt="" /> : <span>ཨ</span>}
-        </div>
-        <div>
-          <p className="eyebrow">{t("audiobook")}</p>
-          <h1>{book.title}</h1>
-          <p className="lead">{book.author}</p>
-          <p className="muted">
-            {book.pageCount} pages · Updated{" "}
-            {new Date(book.updatedAt).toLocaleDateString()}
-          </p>
-          <div className="actions">
-            <Link to={`/books/${book.id}/read`} className="primary">
-              <Play />
-              {t("startListening")}
+    <main className={`details-page${showChat ? " has-chat" : ""}`}>
+      <div className="container details-container">
+        <div className="details-layout">
+          <div className="details-main">
+            <Link to="/library" className="back">
+              <ArrowLeft />
+              {t("backLibrary")}
             </Link>
-            <button
-              className="secondary"
-              disabled
-              title={t("sharedComingBody")}
-            >
-              <Share2 />
-              {t("sharedComing")}
-            </button>
-            <button
-              className="danger-button"
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 />
-              {t("deleteBook")}
-            </button>
+            <section className="book-hero">
+              <Link
+                to={`/books/${book.id}/read`}
+                className="book-cover large"
+                aria-label={t("startListening")}
+              >
+                {book.coverUrl ? (
+                  <img src={book.coverUrl} alt="" />
+                ) : (
+                  <span>ཨ</span>
+                )}
+                <span className="cover-preview">
+                  <Play />
+                  {t("preview")}
+                </span>
+              </Link>
+              <div className="book-hero-copy">
+                <p className="eyebrow badge">{t("audiobook")}</p>
+                <h1>{book.title}</h1>
+                {book.author && <p className="lead">{book.author}</p>}
+                <p className="book-hero-meta muted">
+                  <span>
+                    {book.pageCount} {t("pagesLabel")}
+                  </span>
+                  <span className="meta-sep">·</span>
+                  <span className="meta-with-icon">
+                    <Calendar />
+                    {t("updated")} {new Date(book.updatedAt).toLocaleDateString()}
+                  </span>
+                </p>
+                <div className="actions">
+                  <Link to={`/books/${book.id}/read`} className="primary">
+                    <Play />
+                    {t("startListening")}
+                  </Link>
+                  <button
+                    className="secondary"
+                    disabled
+                    title={t("sharedComingBody")}
+                  >
+                    <Share2 />
+                    {t("sharedComing")}
+                  </button>
+                  <button
+                    className="danger-button"
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <Trash2 />
+                    {t("deleteBook")}
+                  </button>
+                </div>
+              </div>
+            </section>
+            <BookAboutCard book={book} />
+            <section className="toc">
+              <div className="section-heading">
+                <h2>{t("availablePages")}</h2>
+                <span>
+                  {book.pages?.length || 0} of {book.pageCount}
+                </span>
+              </div>
+              {book.pages?.map((page) => (
+                <Link
+                  key={page.id}
+                  to={`/books/${book.id}/read?page=${page.pageNumber}`}
+                >
+                  <span className="page-number">
+                    {String(page.pageNumber).padStart(2, "0")}
+                  </span>
+                  <span>
+                    <strong>
+                      {page.title || `${t("page")} ${page.pageNumber}`}
+                    </strong>
+                    <small>
+                      {page.segments.length} {t("sentencesLabel")}
+                    </small>
+                  </span>
+                  <ChevronRight />
+                </Link>
+              ))}
+            </section>
           </div>
+          {showChat && <BookChatPanel bookId={book.id} />}
         </div>
-      </section>
-      <section className="toc">
-        <div className="section-heading">
-          <h2>{t("availablePages")}</h2>
-          <span>
-            {book.pages?.length || 0} of {book.pageCount}
-          </span>
-        </div>
-        {book.pages?.map((page) => (
-          <Link
-            key={page.id}
-            to={`/books/${book.id}/read?page=${page.pageNumber}`}
-          >
-            <span className="page-number">
-              {String(page.pageNumber).padStart(2, "0")}
-            </span>
-            <span>
-              <strong>{page.title || `${t("page")} ${page.pageNumber}`}</strong>
-              <small>{page.segments.length} sentences</small>
-            </span>
-            <ChevronRight />
-          </Link>
-        ))}
-      </section>
+      </div>
       {confirmDelete && (
         <DeleteBookModal
           title={book.title}
@@ -549,6 +586,281 @@ function DetailsPage() {
         />
       )}
     </main>
+  );
+}
+
+const ASK_PROMPTS = [
+  "askBookPrompt1",
+  "askBookPrompt2",
+  "askBookPrompt3",
+  "askBookPrompt4",
+  "askBookPrompt5",
+] as const;
+
+const VOICE_LABELS: Record<string, "lhasaFemale" | "lhasaMale" | "amdoFemale" | "amdoMale" | "khamFemale" | "khamMale"> = {
+  lhasa_female: "lhasaFemale",
+  lhasaFemale: "lhasaFemale",
+  lhasa_male: "lhasaMale",
+  lhasaMale: "lhasaMale",
+  amdo_female: "amdoFemale",
+  amdoFemale: "amdoFemale",
+  amdo_male: "amdoMale",
+  amdoMale: "amdoMale",
+  kham_female: "khamFemale",
+  khamFemale: "khamFemale",
+  kham_male: "khamMale",
+  khamMale: "khamMale",
+};
+
+function formatDuration(totalMs: number): string {
+  const totalMinutes = Math.max(0, Math.round(totalMs / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (totalMinutes > 0) return `${totalMinutes}m`;
+  const seconds = Math.max(1, Math.round(totalMs / 1000));
+  return `${seconds}s`;
+}
+
+function bookExcerpt(book: Book): string {
+  const text = (book.pages || [])
+    .flatMap((page) => page.segments.map((segment) => segment.text.trim()))
+    .filter(Boolean)
+    .join(" ");
+  return text;
+}
+
+function bookDurationMs(book: Book): number {
+  return (book.pages || []).reduce(
+    (sum, page) =>
+      sum + page.segments.reduce((pageSum, segment) => pageSum + segment.durationMs, 0),
+    0,
+  );
+}
+
+function BookAboutCard({ book }: { book: Book }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const excerpt = bookExcerpt(book);
+  const collapseAt = 220;
+  const needsToggle = excerpt.length > collapseAt;
+  const visibleText =
+    !needsToggle || expanded ? excerpt : `${excerpt.slice(0, collapseAt).trimEnd()}…`;
+  const languageLabel =
+    book.language === "en" ? t("languageEnglish") : t("languageTibetan");
+  const voiceKey = book.ttsVoice ? VOICE_LABELS[book.ttsVoice] : undefined;
+  const narrationLabel = voiceKey ? t(voiceKey) : t("voiceDefault");
+  const durationLabel = formatDuration(bookDurationMs(book));
+  const addedOn = new Date(book.createdAt || book.updatedAt).toLocaleDateString();
+
+  return (
+    <section className="book-about">
+      <div className="section-heading">
+        <h2>{t("aboutBook")}</h2>
+      </div>
+      {excerpt ? (
+        <>
+          <p className="book-about-text">{visibleText}</p>
+          {needsToggle && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {expanded ? t("showLess") : t("showMore")}
+            </button>
+          )}
+        </>
+      ) : (
+        <p className="muted">{book.author || book.title}</p>
+      )}
+      <div className="book-meta-tiles">
+        <div className="book-meta-tile">
+          <Headphones />
+          <div>
+            <span>{t("narration")}</span>
+            <strong>{narrationLabel}</strong>
+          </div>
+        </div>
+        <div className="book-meta-tile">
+          <AudioLines />
+          <div>
+            <span>{t("language")}</span>
+            <strong>{languageLabel}</strong>
+          </div>
+        </div>
+        <div className="book-meta-tile">
+          <Clock />
+          <div>
+            <span>{t("duration")}</span>
+            <strong>{durationLabel}</strong>
+          </div>
+        </div>
+        <div className="book-meta-tile">
+          <Calendar />
+          <div>
+            <span>{t("addedOn")}</span>
+            <strong>{addedOn}</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BookChatPanel({ bookId }: { bookId: string }) {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [citations, setCitations] = useState<number[]>([]);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof el.scrollTo !== "function") return;
+    el.scrollTo({ top: el.scrollHeight });
+  }, [messages, busy, mobileOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [mobileOpen]);
+
+  const send = async (text?: string) => {
+    const message = (text ?? draft).trim();
+    if (!message || busy) return;
+    const history = messages.slice(-12);
+    setDraft("");
+    setError("");
+    setBusy(true);
+    setMessages((prev) => [...prev, { role: "user", content: message }]);
+    try {
+      const result = await api.chatBook(bookId, message, history);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: result.answer },
+      ]);
+      setCitations(result.citations);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("somethingWrong"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="book-chat-column">
+      <button
+        type="button"
+        className="book-chat-fab"
+        onClick={() => setMobileOpen(true)}
+        aria-expanded={mobileOpen}
+      >
+        <Sparkles />
+        <span>{t("askBook")}</span>
+      </button>
+      <button
+        type="button"
+        className={`book-chat-backdrop${mobileOpen ? " open" : ""}`}
+        aria-label={t("closeChat")}
+        onClick={() => setMobileOpen(false)}
+      />
+      <aside
+        className={`book-chat${mobileOpen ? " mobile-open" : ""}`}
+        aria-label={t("askBook")}
+      >
+        <header className="book-chat-header">
+          <div className="book-chat-title">
+            <Sparkles />
+            <div>
+              <strong>{t("askBook")}</strong>
+              <small>{t("askBookHelp")}</small>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="icon-button book-chat-close"
+            aria-label={t("closeChat")}
+            onClick={() => setMobileOpen(false)}
+          >
+            <X />
+          </button>
+          <BookOpen className="book-chat-book-icon" aria-hidden="true" />
+        </header>
+        <div className="book-chat-panel">
+          <div className="book-chat-messages" ref={listRef}>
+            {!messages.length && !busy && (
+              <>
+                <div className="book-chat-bubble assistant">
+                  {t("askBookEmpty")}
+                </div>
+                <div className="book-chat-prompts">
+                  {ASK_PROMPTS.map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className="book-chat-prompt"
+                      disabled={busy}
+                      onClick={() => void send(t(key))}
+                    >
+                      {t(key)}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {messages.map((item, index) => (
+              <div
+                key={`${item.role}-${index}`}
+                className={`book-chat-bubble ${item.role}`}
+              >
+                {item.content}
+              </div>
+            ))}
+            {busy && (
+              <p className="muted book-chat-status">{t("askBookThinking")}</p>
+            )}
+          </div>
+          {!!citations.length && (
+            <p className="book-chat-citations">
+              {t("askBookCitations")}: {citations.join(", ")}
+            </p>
+          )}
+          {error && <p className="error-text">{error}</p>}
+          <form
+            className="book-chat-compose"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void send();
+            }}
+          >
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={t("askBookPlaceholder")}
+              aria-label={t("askBookPlaceholder")}
+              disabled={busy}
+            />
+            <button
+              type="submit"
+              className="book-chat-send"
+              disabled={busy || !draft.trim()}
+              aria-label={t("askBookSend")}
+            >
+              <Send />
+            </button>
+          </form>
+          <p className="book-chat-disclaimer">{t("askBookDisclaimer")}</p>
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -627,6 +939,7 @@ function ReaderPage() {
     [regenerating, setRegenerating] = useState<string[]>([]);
   const audio = useRef<HTMLAudioElement>(null);
   const pendingSeek = useRef(0);
+  const activeSentenceRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     api
       .getBook(id)
@@ -639,6 +952,18 @@ function ReaderPage() {
     const index = book.pages.findIndex((item) => item.pageNumber === requested);
     if (index >= 0) setPageIndex(index);
   }, [book, searchParams]);
+  useEffect(() => {
+    const el = activeSentenceRef.current;
+    if (!el) return;
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    el.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+  }, [segmentIndex, pageIndex]);
   const page = book?.pages?.[pageIndex],
     segment = page?.segments[segmentIndex],
     total = page?.segments.reduce((a, s) => a + s.durationMs, 0) || 1,
@@ -767,100 +1092,21 @@ function ReaderPage() {
   };
   return (
     <div className="reader">
-      <header className="reader-header">
+      <main className="container reading-area">
         <button
-          className="icon-button"
-          aria-label={t("back")}
+          type="button"
+          className="back"
           onClick={() => navigate(`/books/${book.id}`)}
         >
           <ArrowLeft />
+          {book.title}
         </button>
-        <div>
-          <strong>{book.title}</strong>
-          <span>
-            {t("page")} {page.pageNumber} / {book.pageCount}
-          </span>
-        </div>
-        <button className="icon-button" aria-label="More options">
-          <MoreVertical />
-        </button>
-      </header>
-      <main className="reading-area">
-        <div className="reader-tools">
-          <button
-            className="icon-button"
-            aria-label={t("previousPage")}
-            disabled={pageIndex === 0}
-            onClick={() => {
-              setPageIndex((value) => Math.max(0, value - 1));
-              setSegmentIndex(0);
-            }}
-          >
-            <ArrowLeft />
-          </button>
-          <label>
-            {t("page")}
-            <select
-              aria-label={t("page")}
-              value={pageIndex}
-              onChange={(e) => {
-                setPageIndex(Number(e.target.value));
-                setSegmentIndex(0);
-              }}
-            >
-              {book.pages?.map((p, i) => (
-                <option value={i} key={p.id}>
-                  {p.pageNumber}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="icon-button"
-            aria-label={t("nextPage")}
-            disabled={pageIndex >= (book.pages?.length || 1) - 1}
-            onClick={() => {
-              setPageIndex((value) =>
-                Math.min((book.pages?.length || 1) - 1, value + 1),
-              );
-              setSegmentIndex(0);
-            }}
-          >
-            <ChevronRight />
-          </button>
-          <div className="font-control">
-            <button
-              onClick={() => {
-                const n = Math.max(18, fontSize - 2);
-                setFontSize(n);
-                store.set("dadhep.font", n);
-              }}
-            >
-              A−
-            </button>
-            <button
-              onClick={() => {
-                const n = Math.min(40, fontSize + 2);
-                setFontSize(n);
-                store.set("dadhep.font", n);
-              }}
-            >
-              A+
-            </button>
-          </div>
-          <button
-            className="icon-button"
-            aria-label={t("addBookmark")}
-            onClick={saveBookmark}
-          >
-            <Bookmark />
-          </button>
-        </div>
         <article className="page-paper" style={{ fontSize }}>
-          <p className="page-label">{page.title}</p>
+          {page.title && <p className="page-label">{page.title}</p>}
           {page.segments.map((item, i) => (
             <button
               key={item.id}
+              ref={i === segmentIndex ? activeSentenceRef : undefined}
               className={`sentence ${i === segmentIndex ? "active" : ""}`}
               onClick={() => {
                 setSegmentIndex(i);
@@ -880,81 +1126,161 @@ function ReaderPage() {
           <p className="correction-hint">{t("correctionHint")}</p>
         </article>
       </main>
-      <section className="player-controls">
-        <div className="scrub-labels">
-          <span>{time(before + elapsed)}</span>
-          <span>{time(total)}</span>
-        </div>
-        <input
-          className="scrubber"
-          aria-label={t("audioPosition")}
-          type="range"
-          min="0"
-          max={total}
-          value={Math.min(before + elapsed, total)}
-          onChange={(event) => seekPosition(Number(event.target.value))}
-        />
-        <div className="transport">
-          <button
-            aria-label={t("previousSentence")}
-            onClick={() => {
-              setSegmentIndex(Math.max(0, segmentIndex - 1));
-              setElapsed(0);
-            }}
-          >
-            <SkipBack />
-          </button>
-          <button
-            className="main-play"
-            aria-label={playing ? t("pause") : t("play")}
-            onClick={() => setPlaying(!playing)}
-          >
-            {playing ? <Pause /> : <Play />}
-          </button>
-          <button
-            aria-label={t("nextSentence")}
-            onClick={() => {
-              setSegmentIndex(
-                Math.min(page.segments.length - 1, segmentIndex + 1),
-              );
-              setElapsed(0);
-            }}
-          >
-            <SkipForward />
-          </button>
-        </div>
-        <div className="player-options">
-          <label>
-            <Gauge />
-            {t("playbackSpeed")}
-            <select
-              aria-label={t("playbackSpeed")}
-              value={speed}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                setSpeed(next);
-                store.set("dadhep.speed", next);
+      <section className="player-controls" aria-label="Playback">
+        <div className="player-card">
+          <div className="player-tools">
+            <div className="reader-page-nav">
+              <button
+                className="icon-button"
+                aria-label={t("previousPage")}
+                disabled={pageIndex === 0}
+                onClick={() => {
+                  setPageIndex((value) => Math.max(0, value - 1));
+                  setSegmentIndex(0);
+                }}
+              >
+                <ArrowLeft />
+              </button>
+              <label>
+                {t("page")}
+                <select
+                  aria-label={t("page")}
+                  value={pageIndex}
+                  onChange={(e) => {
+                    setPageIndex(Number(e.target.value));
+                    setSegmentIndex(0);
+                  }}
+                >
+                  {book.pages?.map((p, i) => (
+                    <option value={i} key={p.id}>
+                      {p.pageNumber}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="muted reader-page-count">/ {book.pageCount}</span>
+              <button
+                className="icon-button"
+                aria-label={t("nextPage")}
+                disabled={pageIndex >= (book.pages?.length || 1) - 1}
+                onClick={() => {
+                  setPageIndex((value) =>
+                    Math.min((book.pages?.length || 1) - 1, value + 1),
+                  );
+                  setSegmentIndex(0);
+                }}
+              >
+                <ChevronRight />
+              </button>
+            </div>
+            <div className="reader-tools">
+              <div className="font-control">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = Math.max(18, fontSize - 2);
+                    setFontSize(n);
+                    store.set("dadhep.font", n);
+                  }}
+                >
+                  A−
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = Math.min(40, fontSize + 2);
+                    setFontSize(n);
+                    store.set("dadhep.font", n);
+                  }}
+                >
+                  A+
+                </button>
+              </div>
+              <button
+                type="button"
+                className="player-bookmark"
+                aria-label={t("addBookmark")}
+                onClick={saveBookmark}
+              >
+                <Bookmark />
+              </button>
+            </div>
+          </div>
+          <div className="scrub-labels">
+            <span>{time(before + elapsed)}</span>
+            <span>{time(total)}</span>
+          </div>
+          <input
+            className="scrubber"
+            aria-label={t("audioPosition")}
+            type="range"
+            min="0"
+            max={total}
+            value={Math.min(before + elapsed, total)}
+            onChange={(event) => seekPosition(Number(event.target.value))}
+          />
+          <div className="transport">
+            <button
+              aria-label={t("previousSentence")}
+              onClick={() => {
+                setSegmentIndex(Math.max(0, segmentIndex - 1));
+                setElapsed(0);
               }}
             >
-              {[0.75, 1, 1.25, 1.5, 2].map((n) => (
-                <option key={n}>{n}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <Moon />
-            {t("sleepTimer")}
-            <select
-              aria-label={t("sleepTimer")}
-              value={sleep}
-              onChange={(e) => setSleep(Number(e.target.value))}
+              <SkipBack />
+            </button>
+            <button
+              className="main-play"
+              aria-label={playing ? t("pause") : t("play")}
+              onClick={() => setPlaying(!playing)}
             >
-              <option value="0">{t("off")}</option>
-              <option value="5">5 min</option>
-              <option value="15">15 min</option>
-              <option value="30">30 min</option>
-            </select>
-          </label>
+              {playing ? <Pause /> : <Play />}
+            </button>
+            <button
+              aria-label={t("nextSentence")}
+              onClick={() => {
+                setSegmentIndex(
+                  Math.min(page.segments.length - 1, segmentIndex + 1),
+                );
+                setElapsed(0);
+              }}
+            >
+              <SkipForward />
+            </button>
+          </div>
+          <div className="player-options">
+            <label>
+              <Gauge />
+              {t("playbackSpeed")}
+              <select
+                aria-label={t("playbackSpeed")}
+                value={speed}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setSpeed(next);
+                  store.set("dadhep.speed", next);
+                }}
+              >
+                {[0.75, 1, 1.25, 1.5, 2].map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <Moon />
+              {t("sleepTimer")}
+              <select
+                aria-label={t("sleepTimer")}
+                value={sleep}
+                onChange={(e) => setSleep(Number(e.target.value))}
+              >
+                <option value="0">{t("off")}</option>
+                <option value="5">5 min</option>
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+              </select>
+            </label>
+          </div>
         </div>
       </section>
       <audio ref={audio} />
@@ -1027,18 +1353,26 @@ function BookmarksPage() {
     store.get<SavedBookmark[]>("dadhep.bookmarks", []),
   );
   return (
-    <main className="container narrow">
+    <main className="container">
       <p className="eyebrow">{t("savedPlaces")}</p>
       <h1>{t("bookmarks")}</h1>
       {items.length ? (
-        <div className="bookmark-list">
+        <section className="content-card bookmark-list">
+          <div className="section-heading">
+            <h2>{t("savedPlaces")}</h2>
+            <span>{items.length}</span>
+          </div>
           {items.map((item) => (
-            <div className="file-row" key={item.id}>
-              <Bookmark />
+            <div className="file-row bookmark-row" key={item.id}>
+              <span className="bookmark-icon">
+                <Bookmark />
+              </span>
               <Link to={`/books/${item.bookId}/read`}>
                 <strong>{item.label}</strong>
-                <small>{t("page")} {item.pageNumber}</small>
               </Link>
+              <span className="bookmark-page muted">
+                {t("page")} {item.pageNumber}
+              </span>
               <button
                 className="icon-button"
                 aria-label="Remove bookmark"
@@ -1052,9 +1386,9 @@ function BookmarksPage() {
               </button>
             </div>
           ))}
-        </div>
+        </section>
       ) : (
-        <section className="empty-state">
+        <section className="content-card empty-state">
           <div className="empty-icon">
             <Bookmark />
           </div>
@@ -1071,7 +1405,7 @@ function SettingsPage() {
   const [voice, setVoice] = useState(store.get("dadhep.voice", "lhasaFemale")),
     [defaultSpeed, setDefaultSpeed] = useState(store.get("dadhep.speed", 1));
   return (
-    <main className="container narrow">
+    <main className="container">
       <p className="eyebrow">{t("preferences")}</p>
       <h1>{t("settings")}</h1>
       <section className="settings-card">

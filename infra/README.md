@@ -4,6 +4,7 @@ AWS CDK v2 (Python) provisions the MVP as one independently deployable stack:
 
 - Cognito self-service sign-up/sign-in with email or phone aliases.
 - Private, encrypted, versioned uploads, generated-assets, and frontend S3 buckets.
+- An S3 Vectors bucket (`AWS::S3Vectors::VectorBucket`) for per-book RAG indexes.
 - CloudFront with Origin Access Control, HTTPS-only frontend delivery, and SPA
   route rewriting. Generated audio remains private and is delivered with
   short-lived, owner-authorized S3 URLs returned by the API.

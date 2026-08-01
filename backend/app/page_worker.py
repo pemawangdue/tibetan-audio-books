@@ -12,6 +12,7 @@ from .aws import Aws, get_aws
 from .config import Settings, get_settings
 from .models import BookStatus, JobMessage, PageStatus, utc_now
 from .providers import Provider, get_provider, sentence_segments
+from .rag import index_book
 from .repositories import Repositories
 
 
@@ -74,6 +75,8 @@ def _tts_asset(
 def _update_book_progress(
     repos: Repositories,
     message: JobMessage,
+    aws: Aws,
+    settings: Settings,
     *,
     completed: int = 0,
     failed: int = 0,
@@ -93,6 +96,11 @@ def _update_book_progress(
             {":status": final.value, ":now": utc_now()},
             {"#s": "status"},
         )
+        if settings.vector_bucket:
+            try:
+                index_book(aws, settings, repos, message.book_id, message.owner_id)
+            except Exception:
+                logger.exception("RAG indexing failed for book %s", message.book_id)
 
 
 def process_page(
@@ -188,8 +196,17 @@ def process_page(
             )
             elapsed_ms += duration_ms
         _, full_audio = _tts_asset(text, provider, aws, settings)
+        text_key = f"{version_prefix}/fulltext.txt"
         audio_key = f"{version_prefix}/audio.wav"
-        segments_key = f"{version_prefix}/segments.json"
+        segments_key = f"{version_prefix}/segments.json"               
+        # save the full Text here
+        aws.s3.put_object(
+            Bucket=settings.assets_bucket,
+            Key=text_key,
+            Body=text.encode("utf-8"),
+            ContentType="text/plain",
+            ServerSideEncryption="AES256",
+        )
         aws.s3.put_object(
             Bucket=settings.assets_bucket,
             Key=audio_key,
@@ -226,8 +243,21 @@ def process_page(
             {"#s": "status", "#error": "error", "#v": "version"},
             extra_condition="#v = :version AND #s = :processing",
         )
-        if not was_correction:
-            _update_book_progress(repos, message, completed=1)
+        if was_correction:
+            if settings.vector_bucket:
+                try:
+                    index_book(
+                        aws, settings, repos, message.book_id, message.owner_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "RAG re-index after correction failed for book %s",
+                        message.book_id,
+                    )
+        else:
+            _update_book_progress(
+                repos, message, aws, settings, completed=1
+            )
     except Exception as exc:
         logger.exception("Page processing failed")
         terminal = claimed.attempts >= settings.page_max_attempts
@@ -248,7 +278,7 @@ def process_page(
         )
         if terminal:
             if not was_correction:
-                _update_book_progress(repos, message, failed=1)
+                _update_book_progress(repos, message, aws, settings, failed=1)
             return
         raise
 

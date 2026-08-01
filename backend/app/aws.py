@@ -15,6 +15,14 @@ class Aws:
         self.dynamodb = boto3.resource("dynamodb", **kwargs)
         self.s3 = boto3.client("s3", **kwargs)
         self.sqs = boto3.client("sqs", **kwargs)
+        # S3 Vectors / Bedrock stay on the real AWS endpoint even when LocalStack
+        # is used for S3/Dynamo/SQS during local development.
+        self.s3vectors = boto3.client(
+            "s3vectors", region_name=settings.aws_region
+        )
+        self.bedrock = boto3.client(
+            "bedrock-runtime", region_name=settings.aws_region
+        )
         self.settings = settings
 
     def send(self, queue_url: str, message: dict, *, group_id: str | None = None) -> None:

@@ -21,11 +21,13 @@ from aws_cdk import (
     aws_cloudwatch as cloudwatch,
     aws_cognito as cognito,
     aws_dynamodb as dynamodb,
+    aws_iam as iam,
     aws_lambda as lambda_,
     aws_lambda_event_sources as event_sources,
     aws_logs as logs,
     aws_s3 as s3,
     aws_s3_deployment as s3deploy,
+    aws_s3vectors as s3vectors,
     aws_secretsmanager as secretsmanager,
     aws_sqs as sqs,
 )
@@ -95,7 +97,7 @@ class DadhepStack(Stack):
         frontend_asset = frontend_dist_path or str(repository_root / "frontend" / "dist")
 
         api_memory = int(self.node.try_get_context("apiMemoryMb") or 1024)
-        api_timeout = int(self.node.try_get_context("apiTimeoutSeconds") or 30)
+        api_timeout = int(self.node.try_get_context("apiTimeoutSeconds") or 90)
         api_ephemeral = int(self.node.try_get_context("apiEphemeralStorageMb") or 512)
         api_concurrency = int(self.node.try_get_context("apiReservedConcurrency") or 0)
         split_memory = int(self.node.try_get_context("splitMemoryMb") or 2048)
@@ -215,15 +217,39 @@ class DadhepStack(Stack):
             "MonlamSecret",
             str(self.node.try_get_context("monlamSecretName") or "dadhep/monlam-api-key"),
         )
+        vector_bucket_name = f"{self.stack_name.lower()}-vectors-{self.region}"
+        vector_bucket = s3vectors.CfnVectorBucket(
+            self,
+            "VectorBucket",
+            vector_bucket_name=vector_bucket_name,
+            encryption_configuration=s3vectors.CfnVectorBucket.EncryptionConfigurationProperty(
+                sse_type="AES256"
+            ),
+        )
+        vector_bucket.apply_removal_policy(RemovalPolicy.RETAIN)
+        embedding_model_id = str(
+            self.node.try_get_context("embeddingModelId")
+            or "amazon.titan-embed-text-v2:0"
+        )
+        monlam_provider = str(self.node.try_get_context("monlamProvider") or "mock")
+        monlam_api_url = str(self.node.try_get_context("monlamApiUrl") or "")
+        monlam_env = {
+            "MONLAM_PROVIDER": monlam_provider,
+            "MONLAM_API_URL": monlam_api_url,
+            "MONLAM_API_KEY": monlam_secret.secret_value_from_json("key").unsafe_unwrap(),
+        }
 
         common_environment = {
-            "ENV": "production",            
+            "ENV": "production",
             "BOOKS_TABLE": books_table.table_name,
             "BOOKS_OWNER_INDEX": "owner-created_at-index",
             "PAGES_TABLE": pages_table.table_name,
             "CACHE_TABLE": cache_table.table_name,
             "UPLOAD_BUCKET": uploads_bucket.bucket_name,
             "ASSETS_BUCKET": assets_bucket.bucket_name,
+            "VECTOR_BUCKET": vector_bucket_name,
+            "EMBEDDING_MODEL_ID": embedding_model_id,
+            "EMBEDDING_DIMENSIONS": "1024",
         }
         backend_code = lambda_.Code.from_asset(
             backend_asset,
@@ -249,6 +275,7 @@ class DadhepStack(Stack):
             api_concurrency,
             {
                 **common_environment,
+                **monlam_env,
                 "SERVICE": "api",
                 "SPLIT_QUEUE_URL": document_queue.queue_url,
             },
@@ -278,14 +305,8 @@ class DadhepStack(Stack):
             worker_concurrency,
             {
                 **common_environment,
+                **monlam_env,
                 "SERVICE": "page",
-                "MONLAM_PROVIDER": str(
-                    self.node.try_get_context("monlamProvider") or "mock"
-                ),
-                "MONLAM_API_URL": str(
-                    self.node.try_get_context("monlamApiUrl") or ""
-                ),
-                "MONLAM_API_KEY": monlam_secret.secret_value_from_json("key").unsafe_unwrap(),
                 "PROCESSING_LEASE_SECONDS": str(worker_timeout + 30),
             },
         )
@@ -320,6 +341,7 @@ class DadhepStack(Stack):
         uploads_bucket.grant_read_write(api_function)
         assets_bucket.grant_read_write(api_function)
         document_queue.grant_send_messages(api_function)
+        monlam_secret.grant_read(api_function)
 
         uploads_bucket.grant_read(split_function)
         books_table.grant_read_write_data(split_function)
@@ -333,6 +355,34 @@ class DadhepStack(Stack):
         cache_table.grant_read_write_data(worker_function)
         assets_bucket.grant_read_write(worker_function)
         monlam_secret.grant_read(worker_function)
+
+        # Bucket is owned by the stack; Lambdas only manage per-book indexes/vectors.
+        vector_read_write = iam.PolicyStatement(
+            actions=[
+                "s3vectors:GetVectorBucket",
+                "s3vectors:CreateIndex",
+                "s3vectors:GetIndex",
+                "s3vectors:DeleteIndex",
+                "s3vectors:PutVectors",
+                "s3vectors:QueryVectors",
+                "s3vectors:GetVectors",
+                "s3vectors:ListVectors",
+                "s3vectors:DeleteVectors",
+            ],
+            resources=["*"],
+        )
+        bedrock_embed = iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[
+                f"arn:aws:bedrock:{self.region}::foundation-model/{embedding_model_id}",
+                f"arn:aws:bedrock:{self.region}:{self.account}:inference-profile/*",
+            ],
+        )
+        for function in (api_function, worker_function):
+            function.add_to_role_policy(vector_read_write)
+            function.add_to_role_policy(bedrock_embed)
+        api_function.node.add_dependency(vector_bucket)
+        worker_function.node.add_dependency(vector_bucket)
 
         user_pool = cognito.UserPool(
             self,
@@ -495,6 +545,8 @@ class DadhepStack(Stack):
             "UploadsBucketName": uploads_bucket.bucket_name,
             "AssetsBucketName": assets_bucket.bucket_name,
             "FrontendBucketName": frontend_bucket.bucket_name,
+            "VectorBucketName": vector_bucket_name,
+            "VectorBucketArn": vector_bucket.attr_vector_bucket_arn,
             "BooksTableName": books_table.table_name,
             "PagesTableName": pages_table.table_name,
             "CacheTableName": cache_table.table_name,

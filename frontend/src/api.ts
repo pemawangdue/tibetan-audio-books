@@ -1,6 +1,8 @@
 import type {
   Book,
   BookPage,
+  ChatMessage,
+  ChatResponse,
   CorrectionRequest,
   PresignedUpload,
   ProcessingJob,
@@ -61,6 +63,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 interface ApiBook {
   book_id: string;
   title: string;
+  language?: string;
+  tts_voice?: string;
   status:
     | "uploading"
     | "queued"
@@ -73,6 +77,7 @@ interface ApiBook {
   completed_pages: number;
   failed_pages: number;
   cover_url?: string;
+  created_at?: string;
   updated_at: string;
 }
 
@@ -143,6 +148,9 @@ function createMockBooks(): Book[] {
       title: "A Path of Compassion",
       status: "ready",
       pageCount: 1,
+      language: "bo",
+      ttsVoice: "lhasa_female",
+      createdAt: "2026-08-01T10:00:00.000Z",
       updatedAt: new Date().toISOString(),
       owner: "me",
       pages: samplePages,
@@ -179,6 +187,9 @@ function mapBook(book: ApiBook, pages?: BookPage[]): Book {
         )
       : 0,
     pageCount: book.total_pages,
+    language: book.language || "bo",
+    ttsVoice: book.tts_voice || "default",
+    createdAt: book.created_at || book.updated_at,
     updatedAt: book.updated_at,
     owner: "me",
     pages,
@@ -243,6 +254,33 @@ export const api = {
       return;
     }
     await request(`/books/${id}`, { method: "DELETE" });
+  },
+
+  async chatBook(
+    bookId: string,
+    message: string,
+    history: ChatMessage[] = [],
+  ): Promise<ChatResponse> {
+    if (MOCK_API) {
+      return {
+        answer: `Mock answer for “${message}” based on this book.`,
+        citations: [1],
+        indexStatus: "ready",
+      };
+    }
+    const response = await request<{
+      answer: string;
+      citations: number[];
+      index_status?: string | null;
+    }>(`/books/${bookId}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ message, history }),
+    });
+    return {
+      answer: response.answer,
+      citations: response.citations,
+      indexStatus: response.index_status,
+    };
   },
 
   async createUpload(input: UploadRequest): Promise<PresignedUpload> {

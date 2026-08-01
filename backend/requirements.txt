@@ -6,5 +6,6 @@ PyJWT[crypto]>=2.10,<3
 httpx>=0.28,<1
 requests>=2.32,<3
 PyMuPDF>=1.25,<2
+Pillow>=11,<12
 mutagen>=1.47,<2
 uvicorn[standard]>=0.30,<1

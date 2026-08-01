@@ -22,6 +22,9 @@ export interface Book {
   status: BookStatus
   progress?: number
   pageCount: number
+  language?: string
+  ttsVoice?: string
+  createdAt?: string
   updatedAt: string
   owner: 'me' | 'shared'
   pages?: BookPage[]
@@ -67,6 +70,17 @@ export interface CorrectionRequest {
   bookId: string
   pageNumber: number
   correctedText: string
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatResponse {
+  answer: string
+  citations: number[]
+  indexStatus?: string | null
 }
 
 export interface ApiErrorShape {
