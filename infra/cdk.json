@@ -24,10 +24,10 @@
     "workerMemoryMb": 3008,
     "workerTimeoutSeconds": 300,
     "workerEphemeralStorageMb": 4096,
-    "workerReservedConcurrency": 50,
+    "workerReservedConcurrency": 20,
     "priorityBatchSize": 1,
-    "priorityMaxConcurrency": 10,
+    "priorityMaxConcurrency": 5,
     "standardBatchSize": 1,
-    "standardMaxConcurrency": 40
+    "standardMaxConcurrency": 15
   }
 }
