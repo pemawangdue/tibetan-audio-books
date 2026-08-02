@@ -91,9 +91,9 @@ The Monlam secret must already exist in the region. Override the name with `-c m
 |----------|--------|---------|-----------|----------------------|
 | API | 1024 MiB | **90 s** | 512 MiB | 200 |
 | Split | 2048 MiB | 300 s | 2048 MiB | 2 |
-| Page worker | 3008 MiB | 300 s | 4096 MiB | 200 |
+| Page worker | 3008 MiB | 300 s | 4096 MiB | 50 |
 
-SQS event sources (defaults): document batch size `1` / max concurrency `2`; page priority max concurrency `40`, standard `160` (batch size `1` each). Priority + standard must fit under the worker’s reserved concurrency.
+SQS event sources (defaults): document batch size `1` / max concurrency `2`; page priority max concurrency `10`, standard `40` (batch size `1` each). Priority + standard must fit under the worker’s reserved concurrency.
 
 Override any value with `-c key=value`. Synthesis validates memory/ephemeral ranges and concurrency relationships.
 
@@ -133,5 +133,5 @@ Treat production data carefully; change policies before real user data if you ne
 ## Notes
 
 - Pages are accessed by `book_id` + `page_number` (no extra Pages GSIs in this stack).  
-- Page priority queue defaults to `40` concurrent invocations and standard to `160` (200 total under the worker reserved concurrency). Raise priority further if you need faster page-1 / correction turnaround.  
+- Page priority queue defaults to `10` concurrent invocations and standard to `40` (50 total under the worker reserved concurrency). Raise priority further if you need faster page-1 / correction turnaround.  
 - Requires `aws-cdk-lib` with S3 Vectors L1 support (see `requirements.txt`).  
