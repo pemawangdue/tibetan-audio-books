@@ -55,6 +55,7 @@ import { AuthProvider, LoginPage, ProtectedRoute, useAuth } from "./auth";
 import { I18nProvider, useI18n } from "./i18n";
 import type {
   Book,
+  BookPage,
   Bookmark as SavedBookmark,
   ChatMessage,
   ProcessingJob,
@@ -130,11 +131,14 @@ function Shell({ children }: { children: ReactNode }) {
           <Link to={`/books/${player.book.id}/read`} className="mini-copy">
             <strong>{player.book.title}</strong>
             <span>
-              {player.book.pages?.[player.page]?.segments[player.segment]?.text}
+              {
+                player.book.pages?.find((item) => item.pageNumber === player.page)
+                  ?.segments[player.segment]?.text
+              }
             </span>
           </Link>
           <span>
-            {player.page + 1}/{player.book.pageCount}
+            {player.page}/{player.book.pageCount}
           </span>
           <button
             className="icon-button"
@@ -622,6 +626,24 @@ function ProcessingPage() {
 }
 
 const DETAILS_PAGE_BATCH = 10;
+const READER_PAGE_BATCH = 10;
+
+function pageBatchAround(ready: number[], focusPage: number, size: number) {
+  if (!ready.length) return [];
+  let focusIdx = ready.indexOf(focusPage);
+  if (focusIdx < 0) focusIdx = 0;
+  const start = Math.max(
+    0,
+    Math.min(focusIdx, Math.max(0, ready.length - size)),
+  );
+  return ready.slice(start, start + size);
+}
+
+function mergeBookPages(existing: BookPage[] | undefined, incoming: BookPage[]) {
+  const map = new Map((existing || []).map((page) => [page.pageNumber, page]));
+  for (const page of incoming) map.set(page.pageNumber, page);
+  return [...map.values()].sort((a, b) => a.pageNumber - b.pageNumber);
+}
 
 function DetailsPage() {
   const { id = "" } = useParams();
@@ -1183,7 +1205,8 @@ function ReaderPage() {
   const { t } = useI18n();
   const [searchParams] = useSearchParams();
   const [book, setBook] = useState<Book | null>(null),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [readyPages, setReadyPages] = useState<number[]>([]);
   const [pageIndex, setPageIndex] = useState(0),
     [segmentIndex, setSegmentIndex] = useState(0),
     [playing, setPlaying] = useState(false),
@@ -1196,18 +1219,101 @@ function ReaderPage() {
   const audio = useRef<HTMLAudioElement>(null);
   const pendingSeek = useRef(0);
   const activeSentenceRef = useRef<HTMLButtonElement>(null);
+  const readyPagesRef = useRef<number[]>([]);
+  const loadedPagesRef = useRef<Set<number>>(new Set());
+  const inflightPagesRef = useRef<Set<number>>(new Set());
+  const speedRef = useRef(speed);
+  const playingRef = useRef(playing);
+  const pageRef = useRef<BookPage | undefined>(undefined);
+  const segmentIndexRef = useRef(0);
+  const pageIndexRef = useRef(0);
+  const readyCountRef = useRef(0);
+  speedRef.current = speed;
+  playingRef.current = playing;
+
+  const loadReaderPages = async (pageNumbers: number[]) => {
+    const needed = pageNumbers.filter(
+      (pageNumber) =>
+        !loadedPagesRef.current.has(pageNumber) &&
+        !inflightPagesRef.current.has(pageNumber),
+    );
+    if (!needed.length) return;
+    needed.forEach((pageNumber) => inflightPagesRef.current.add(pageNumber));
+    try {
+      const pages = await api.getBookPages(id, needed);
+      pages.forEach((page) => loadedPagesRef.current.add(page.pageNumber));
+      setBook((current) => {
+        if (!current) return current;
+        return { ...current, pages: mergeBookPages(current.pages, pages) };
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("somethingWrong"));
+    } finally {
+      needed.forEach((pageNumber) =>
+        inflightPagesRef.current.delete(pageNumber),
+      );
+    }
+  };
+
   useEffect(() => {
+    let cancelled = false;
+    setBook(null);
+    setReadyPages([]);
+    setPageIndex(0);
+    setSegmentIndex(0);
+    setError("");
+    readyPagesRef.current = [];
+    loadedPagesRef.current = new Set();
+    inflightPagesRef.current = new Set();
     api
-      .getBook(id)
-      .then(setBook)
-      .catch((e) => setError(e.message));
+      .getBook(id, { loadPages: false })
+      .then((next) => {
+        if (cancelled) return;
+        const ready = next.readyPages || [];
+        readyPagesRef.current = ready;
+        setReadyPages(ready);
+        setBook({ ...next, pages: [] });
+        const requested = Number(searchParams.get("page"));
+        const startNumber = ready.includes(requested) ? requested : ready[0];
+        const startIndex = Math.max(0, ready.indexOf(startNumber));
+        setPageIndex(startIndex >= 0 ? startIndex : 0);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
+
   useEffect(() => {
-    if (!book?.pages) return;
+    if (!readyPages.length) return;
     const requested = Number(searchParams.get("page"));
-    const index = book.pages.findIndex((item) => item.pageNumber === requested);
+    const index = readyPages.indexOf(requested);
     if (index >= 0) setPageIndex(index);
-  }, [book, searchParams]);
+  }, [readyPages, searchParams]);
+
+  const pageNumber = readyPages[pageIndex];
+  useEffect(() => {
+    if (!pageNumber) return;
+    void loadReaderPages(
+      pageBatchAround(readyPagesRef.current, pageNumber, READER_PAGE_BATCH),
+    );
+    const prefetchNumber =
+      readyPagesRef.current[
+        Math.min(readyPagesRef.current.length - 1, pageIndex + 3)
+      ];
+    if (prefetchNumber && prefetchNumber !== pageNumber) {
+      void loadReaderPages(
+        pageBatchAround(
+          readyPagesRef.current,
+          prefetchNumber,
+          READER_PAGE_BATCH,
+        ),
+      );
+    }
+  }, [pageNumber, pageIndex, id]);
+
   useEffect(() => {
     const el = activeSentenceRef.current;
     if (!el) return;
@@ -1220,13 +1326,35 @@ function ReaderPage() {
       inline: "nearest",
     });
   }, [segmentIndex, pageIndex]);
-  const page = book?.pages?.[pageIndex],
+  const page = book?.pages?.find((item) => item.pageNumber === pageNumber),
     segment = page?.segments[segmentIndex],
     total = page?.segments.reduce((a, s) => a + s.durationMs, 0) || 1,
     before =
       page?.segments
         .slice(0, segmentIndex)
         .reduce((a, s) => a + s.durationMs, 0) || 0;
+  pageRef.current = page;
+  segmentIndexRef.current = segmentIndex;
+  pageIndexRef.current = pageIndex;
+  readyCountRef.current = readyPages.length;
+
+  const advancePlayback = () => {
+    setElapsed(0);
+    const currentPage = pageRef.current;
+    const currentSegment = segmentIndexRef.current;
+    const currentPageIndex = pageIndexRef.current;
+    if (currentPage && currentSegment < currentPage.segments.length - 1) {
+      setSegmentIndex(currentSegment + 1);
+      return;
+    }
+    if (currentPageIndex < readyCountRef.current - 1) {
+      setPageIndex(currentPageIndex + 1);
+      setSegmentIndex(0);
+      return;
+    }
+    setPlaying(false);
+  };
+
   const seekPosition = (target: number) => {
     if (!page) return;
     let cursor = 0;
@@ -1248,63 +1376,81 @@ function ReaderPage() {
     }
   };
   useEffect(() => {
-    if (!playing || !segment) return;
-    const start = Date.now() - elapsed / speed;
-    const timer = setInterval(() => {
-      const next = (Date.now() - start) * speed;
-      if (next >= segment.durationMs) {
-        setElapsed(0);
-        if (segmentIndex < (page?.segments.length || 0) - 1)
-          setSegmentIndex((i) => i + 1);
-        else if (book?.pages && pageIndex < book.pages.length - 1) {
-          setPageIndex((i) => i + 1);
-          setSegmentIndex(0);
-        } else setPlaying(false);
-      } else setElapsed(next);
-    }, 250);
-    return () => clearInterval(timer);
-  }, [playing, segment, segmentIndex, page, pageIndex, book, speed, elapsed]);
-  useEffect(() => {
     if (!sleep || !playing) return;
     const timer = setTimeout(() => setPlaying(false), sleep * 60000);
     return () => clearTimeout(timer);
   }, [sleep, playing]);
   useEffect(() => {
-    if (book)
+    if (book && pageNumber)
       setGlobalPlayer?.({
         book,
-        page: pageIndex,
+        page: pageNumber,
         segment: segmentIndex,
         playing,
       });
-  }, [book, pageIndex, segmentIndex, playing]);
+  }, [book, pageNumber, segmentIndex, playing]);
   useEffect(() => {
     const element = audio.current;
     if (!element || !segment?.audioUrl) return;
-    element.src = segment.audioUrl;
-    const start = () => {
-      if (pendingSeek.current) {
-        element.currentTime = pendingSeek.current / 1000;
-        pendingSeek.current = 0;
+
+    const applyRate = () => {
+      element.playbackRate = speedRef.current;
+    };
+    const applySeek = () => {
+      if (!pendingSeek.current) return;
+      element.currentTime = pendingSeek.current / 1000;
+      pendingSeek.current = 0;
+    };
+    const onReady = () => {
+      applyRate();
+      applySeek();
+      if (playingRef.current) {
+        element.play().catch(() => setPlaying(false));
       }
     };
-    if (element.readyState >= 1) start();
-    else element.addEventListener("loadedmetadata", start, { once: true });
-    return () => element.removeEventListener("loadedmetadata", start);
-  }, [segment]);
+    const onTimeUpdate = () => {
+      setElapsed(element.currentTime * 1000);
+    };
+    const onEnded = () => {
+      advancePlayback();
+    };
+
+    element.pause();
+    element.src = segment.audioUrl;
+    applyRate();
+    element.load();
+    element.addEventListener("loadedmetadata", onReady);
+    element.addEventListener("timeupdate", onTimeUpdate);
+    element.addEventListener("ended", onEnded);
+    if (element.readyState >= 1) onReady();
+
+    return () => {
+      element.removeEventListener("loadedmetadata", onReady);
+      element.removeEventListener("timeupdate", onTimeUpdate);
+      element.removeEventListener("ended", onEnded);
+    };
+  }, [segment?.id, segment?.audioUrl]);
   useEffect(() => {
-    if (audio.current) audio.current.playbackRate = speed;
+    const element = audio.current;
+    if (!element) return;
+    element.playbackRate = speed;
   }, [speed]);
   useEffect(() => {
     const element = audio.current;
     if (!element || !segment?.audioUrl) return;
-    if (playing) element.play().catch(() => setPlaying(false));
-    else element.pause();
-  }, [playing, segment]);
+    if (playing) {
+      element.playbackRate = speedRef.current;
+      if (element.paused) element.play().catch(() => setPlaying(false));
+    } else {
+      element.pause();
+    }
+  }, [playing, segment?.id]);
   if (error) return <ErrorState message={error} />;
-  if (!book || !page || !segment)
+  if (!book || !pageNumber)
     return <div className="center-screen">{t("openingBook")}</div>;
+  const pageReady = Boolean(page && segment);
   const saveBookmark = () => {
+    if (!page || !segment) return;
     const items = store.get<SavedBookmark[]>("dadhep.bookmarks", []);
     items.push({
       id: crypto.randomUUID(),
@@ -1317,7 +1463,7 @@ function ReaderPage() {
     store.set("dadhep.bookmarks", items);
   };
   const submitCorrection = async (text: string) => {
-    if (!correcting) return;
+    if (!correcting || !page) return;
     const sid = correcting.id;
     setRegenerating((v) => [...v, sid]);
     const correctedPage = page.segments
@@ -1358,28 +1504,34 @@ function ReaderPage() {
           {book.title}
         </button>
         <article className="page-paper" style={{ fontSize }}>
-          {page.title && <p className="page-label">{page.title}</p>}
-          {page.segments.map((item, i) => (
-            <button
-              key={item.id}
-              ref={i === segmentIndex ? activeSentenceRef : undefined}
-              className={`sentence ${i === segmentIndex ? "active" : ""}`}
-              onClick={() => {
-                setSegmentIndex(i);
-                setElapsed(0);
-              }}
-              onDoubleClick={() => setCorrecting(item)}
-            >
-              {item.text}
-              {regenerating.includes(item.id) && (
-                <span className="regenerating">
-                  <RotateCcw />
-                  {t("regenerating")}
-                </span>
-              )}
-            </button>
-          ))}
-          <p className="correction-hint">{t("correctionHint")}</p>
+          {!page || !segment ? (
+            <p className="muted">{t("loadingMorePages")}</p>
+          ) : (
+            <>
+              {page.title && <p className="page-label">{page.title}</p>}
+              {page.segments.map((item, i) => (
+                <button
+                  key={item.id}
+                  ref={i === segmentIndex ? activeSentenceRef : undefined}
+                  className={`sentence ${i === segmentIndex ? "active" : ""}`}
+                  onClick={() => {
+                    setSegmentIndex(i);
+                    setElapsed(0);
+                  }}
+                  onDoubleClick={() => setCorrecting(item)}
+                >
+                  {item.text}
+                  {regenerating.includes(item.id) && (
+                    <span className="regenerating">
+                      <RotateCcw />
+                      {t("regenerating")}
+                    </span>
+                  )}
+                </button>
+              ))}
+              <p className="correction-hint">{t("correctionHint")}</p>
+            </>
+          )}
         </article>
       </main>
       <section className="player-controls" aria-label="Playback">
@@ -1407,21 +1559,23 @@ function ReaderPage() {
                     setSegmentIndex(0);
                   }}
                 >
-                  {book.pages?.map((p, i) => (
-                    <option value={i} key={p.id}>
-                      {p.pageNumber}
+                  {readyPages.map((number, i) => (
+                    <option value={i} key={number}>
+                      {number}
                     </option>
                   ))}
                 </select>
               </label>
-              <span className="muted reader-page-count">/ {book.pageCount}</span>
+              <span className="muted reader-page-count">
+                / {readyPages.length || book.pageCount}
+              </span>
               <button
                 className="icon-button"
                 aria-label={t("nextPage")}
-                disabled={pageIndex >= (book.pages?.length || 1) - 1}
+                disabled={pageIndex >= readyPages.length - 1}
                 onClick={() => {
                   setPageIndex((value) =>
-                    Math.min((book.pages?.length || 1) - 1, value + 1),
+                    Math.min(readyPages.length - 1, value + 1),
                   );
                   setSegmentIndex(0);
                 }}
@@ -1478,6 +1632,7 @@ function ReaderPage() {
           <div className="transport">
             <button
               aria-label={t("previousSentence")}
+              disabled={!pageReady}
               onClick={() => {
                 setSegmentIndex(Math.max(0, segmentIndex - 1));
                 setElapsed(0);
@@ -1488,17 +1643,16 @@ function ReaderPage() {
             <button
               className="main-play"
               aria-label={playing ? t("pause") : t("play")}
+              disabled={!pageReady}
               onClick={() => setPlaying(!playing)}
             >
               {playing ? <Pause /> : <Play />}
             </button>
             <button
               aria-label={t("nextSentence")}
+              disabled={!pageReady}
               onClick={() => {
-                setSegmentIndex(
-                  Math.min(page.segments.length - 1, segmentIndex + 1),
-                );
-                setElapsed(0);
+                advancePlayback();
               }}
             >
               <SkipForward />
@@ -1515,10 +1669,13 @@ function ReaderPage() {
                   const next = Number(e.target.value);
                   setSpeed(next);
                   store.set("dadhep.speed", next);
+                  if (audio.current) audio.current.playbackRate = next;
                 }}
               >
                 {[0.75, 1, 1.25, 1.5, 2].map((n) => (
-                  <option key={n}>{n}</option>
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
                 ))}
               </select>
             </label>
