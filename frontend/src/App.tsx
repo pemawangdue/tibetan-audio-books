@@ -645,6 +645,24 @@ function mergeBookPages(existing: BookPage[] | undefined, incoming: BookPage[]) 
   return [...map.values()].sort((a, b) => a.pageNumber - b.pageNumber);
 }
 
+/** Bare shad / punctuation-only segments should not be read aloud. */
+function isSkippableReadingText(text: string): boolean {
+  return text.trim() === "།";
+}
+
+function findReadableSegmentIndex(
+  segments: SentenceSegment[],
+  from: number,
+  direction: 1 | -1,
+): number | null {
+  let index = from;
+  while (index >= 0 && index < segments.length) {
+    if (!isSkippableReadingText(segments[index].text)) return index;
+    index += direction;
+  }
+  return null;
+}
+
 function DetailsPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -1343,9 +1361,16 @@ function ReaderPage() {
     const currentPage = pageRef.current;
     const currentSegment = segmentIndexRef.current;
     const currentPageIndex = pageIndexRef.current;
-    if (currentPage && currentSegment < currentPage.segments.length - 1) {
-      setSegmentIndex(currentSegment + 1);
-      return;
+    if (currentPage) {
+      const nextReadable = findReadableSegmentIndex(
+        currentPage.segments,
+        currentSegment + 1,
+        1,
+      );
+      if (nextReadable != null) {
+        setSegmentIndex(nextReadable);
+        return;
+      }
     }
     if (currentPageIndex < readyCountRef.current - 1) {
       setPageIndex(currentPageIndex + 1);
@@ -1381,6 +1406,20 @@ function ReaderPage() {
     return () => clearTimeout(timer);
   }, [sleep, playing]);
   useEffect(() => {
+    if (!page || !segment || !isSkippableReadingText(segment.text)) return;
+    const nextReadable = findReadableSegmentIndex(
+      page.segments,
+      segmentIndex + (playing ? 1 : 0),
+      1,
+    );
+    if (nextReadable != null && nextReadable !== segmentIndex) {
+      setSegmentIndex(nextReadable);
+      setElapsed(0);
+      return;
+    }
+    if (playing) advancePlayback();
+  }, [playing, segment?.id, segment?.text, pageIndex, page, segmentIndex]);
+  useEffect(() => {
     if (book && pageNumber)
       setGlobalPlayer?.({
         book,
@@ -1392,6 +1431,7 @@ function ReaderPage() {
   useEffect(() => {
     const element = audio.current;
     if (!element || !segment?.audioUrl) return;
+    if (isSkippableReadingText(segment.text)) return;
 
     const applyRate = () => {
       element.playbackRate = speedRef.current;
@@ -1634,7 +1674,14 @@ function ReaderPage() {
               aria-label={t("previousSentence")}
               disabled={!pageReady}
               onClick={() => {
-                setSegmentIndex(Math.max(0, segmentIndex - 1));
+                if (!page) return;
+                const previous = findReadableSegmentIndex(
+                  page.segments,
+                  segmentIndex - 1,
+                  -1,
+                );
+                if (previous == null) return;
+                setSegmentIndex(previous);
                 setElapsed(0);
               }}
             >
